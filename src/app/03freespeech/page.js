@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react';
 
-export default function Screening() {
+export default function Screening({ embedded=false, onDone }) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingComplete, setRecordingComplete] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -246,17 +246,7 @@ export default function Screening() {
 
           {!recordingComplete ? (
             <>
-              <div style={{ 
-                fontSize: '3.5rem', 
-                fontWeight: '300',
-                color: 'white',
-                marginBottom: '2rem',
-                fontVariantNumeric: 'tabular-nums',
-                textShadow: '0 2px 10px rgba(0,0,0,0.2)',
-                opacity: isRecording ? 1 : 0.7
-              }}>
-                {formatTime(recordingTime)}
-              </div>
+              {/* timer hidden per unified spec; keeping recording cue only */}
 
               <button
                 onClick={isRecording ? stopRecording : startRecording}
@@ -323,9 +313,7 @@ export default function Screening() {
               }}>
                 {uploadSuccess ? 'Upload Complete!' : 'Recording Complete'}
               </p>
-              <p style={{ color: '#718096', marginBottom: '2rem', fontSize: '1rem' }}>
-                Duration: {formatTime(recordingTime)}
-              </p>
+              {/* no time shown in UI */}
               
               {!uploadSuccess && (
                 <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginBottom: '1.5rem' }}>
@@ -394,7 +382,11 @@ export default function Screening() {
                   {uploadSuccess ? 'New Recording' : 'Record Again'}
                 </button>
                 <button
-                  onClick={() => window.location.href = '/'}
+                  onClick={() => {
+                    const meta={ testDate: new Date().toISOString(), durationSec: recordingTime };
+                    if(embedded){ onDone?.({ wavBlob: audioChunksRef.current.length? new Blob(audioChunksRef.current, { type: 'audio/webm' }) : null, meta }); }
+                    else { window.location.href = '/'; }
+                  }}
                   style={{
                     padding: '0.85rem 1.75rem',
                     background: '#f7fafc',
@@ -413,7 +405,7 @@ export default function Screening() {
                     e.currentTarget.style.background = '#f7fafc';
                   }}
                 >
-                  Back to Home
+                  {embedded ? 'Continue' : 'Back to Home'}
                 </button>
               </div>
             </div>

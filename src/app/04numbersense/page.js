@@ -7,32 +7,35 @@ function randInt(min, max) {
 }
 
 function generateComparisonNumber(problem) {
-  const product = problem.a * problem.b;
-  
+  const product = problem.a * problem.b
+
+  // Try multiple strategies but never loop forever; ensure >=10 and diff >=5
   const strategies = [
     () => {
-      const variance = product * 0.2;
-      return randInt(Math.max(1, Math.floor(product - variance)), Math.floor(product + variance));
+      const variance = Math.max(5, Math.floor(product * 0.2))
+      const low = Math.max(10, product - variance)
+      const high = Math.max(low + 1, product + variance)
+      return randInt(low, high)
     },
     () => {
-      const roundTo = randInt(1, 3) === 1 ? 10 : 25;
-      const base = Math.round(product / roundTo) * roundTo;
-      return base + (randInt(0, 1) ? roundTo : -roundTo);
+      const roundTo = randInt(1, 3) === 1 ? 10 : 25
+      const base = Math.round(product / roundTo) * roundTo
+      const delta = (randInt(1, 2)) * roundTo // at least one step away
+      return base + (randInt(0, 1) ? delta : -delta)
     },
     () => {
-      const maxReasonable = Math.max(100, product * 3);
-      return randInt(10, maxReasonable);
+      const maxReasonable = Math.max(100, product * 3)
+      return randInt(10, maxReasonable)
     }
-  ];
-  
-  const strategy = strategies[randInt(0, strategies.length - 1)];
-  let comparisonNumber = strategy();
-  
-  while (Math.abs(comparisonNumber - product) < 5 || comparisonNumber < 10) {
-    comparisonNumber = strategy();
+  ]
+
+  for (let i = 0; i < 24; i++) {
+    const candidate = strategies[randInt(0, strategies.length - 1)]()
+    if (candidate >= 10 && Math.abs(candidate - product) >= 5) return candidate
   }
-  
-  return Math.max(10, comparisonNumber);
+
+  // Fallback guarantees constraints
+  return product + 10
 }
 
 function generateProblemSet(count = 3) {
@@ -80,7 +83,7 @@ function generateProblemSet(count = 3) {
   return problems;
 }
 
-export default function MathNumberSense() {
+export default function MathNumberSense({ embedded=false, onDone }) {
   const [problems, setProblems] = useState(null)
   const [currentProblemIndex, setCurrentProblemIndex] = useState(0)
   const [testStarted, setTestStarted] = useState(false)
@@ -317,6 +320,19 @@ export default function MathNumberSense() {
       }, 100);
 
       setUploadSuccess(true);
+      if(embedded){ onDone?.({ wavBlob: wavBlob, markers: {
+        testDate: new Date().toISOString(),
+        totalDuration: recordingTime,
+        problems: problems.map((p, idx) => ({
+          index: idx,
+          description: p.description,
+          type: p.type,
+          product: p.product,
+          comparisonNumber: p.comparisonNumber,
+          isLargerThanComparison: p.isLargerThanComparison
+        })),
+        timeMarkers: timeMarkers
+      }}); }
     } catch (error) {
       console.error('Error downloading:', error);
       alert('Error downloading files. Please try again.');
@@ -551,9 +567,7 @@ export default function MathNumberSense() {
         Is it larger than: <strong>{currentProblem.comparisonNumber}</strong>?
       </div>
 
-      <div style={timerStyle}>
-        {formatTime(recordingTime)}
-      </div>
+      {/* timer hidden per unified spec */}
 
       <div style={{ 
         margin: "1rem 0",

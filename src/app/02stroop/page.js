@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /** ================= THEME (dark purple) ================= */
-const TEXT = "#EDE9FE", MUTED = "#C4B5FD";
-const BG_START = "#0B021A", BG_END = "#1B0B3A";
-const CARD_BG = "#120A24", CARD_BD = "#2A1B4D";
-const ACCENT = "#7C3AED", ACCENT_SOFT = "#A78BFA";
+const TEXT = "#f7f8fb", MUTED = "#9aa0a6";
+const BG_START = "#0e0e10", BG_END = "#0b0c0f";
+const CARD_BG = "#16171a", CARD_BD = "#1e2126";
+const ACCENT = "#4b8cf5", ACCENT_SOFT = "#72a2f7";
 
 /** ================= PROTOCOL CONSTANTS ================= */
 const TRIALS_PER_TASK = 23;
@@ -60,10 +60,7 @@ const Pill = ({ children }) => (
     {children}
   </span>
 );
-const BigTimer = ({ seconds }) => {
-  const m = Math.floor(seconds/60), s = String(seconds%60).padStart(2,"0");
-  return <div style={{fontSize:"3.0rem",fontWeight:300,color:TEXT,textAlign:"center",margin:"6px 0 10px",fontVariantNumeric:"tabular-nums",textShadow:"0 2px 12px rgba(0,0,0,0.35)"}}>{m}:{s}</div>;
-};
+const BigTimer = ({ seconds }) => null; // Hidden per unified spec
 
 /** ================= HELPERS ================= */
 const shuffled = (a) => { const x=[...a]; for(let i=x.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [x[i],x[j]]=[x[j],x[i]];} return x; };
@@ -90,7 +87,7 @@ class MicRecorder {
   async start(){
     this.stream = await navigator.mediaDevices.getUserMedia({ audio:{ channelCount:1, echoCancellation:false, noiseSuppression:false, autoGainControl:false } });
     const AC = (window.AudioContext||window.webkitAudioContext);
-    this.ctx = new AC({ sampleRate:AUDIO_SAMPLE_RATE_HZ, latencyHint:'interactive' });
+    this.ctx = new AC({latencyHint:'interactive' });
     this.sampleRate=this.ctx.sampleRate;
     this.source = this.ctx.createMediaStreamSource(this.stream);
     this.processor = this.ctx.createScriptProcessor(this.frameSize,1,1);
@@ -143,72 +140,8 @@ function downloadCSV(filename, rows, descriptions){
 
 /** ================= WEBCAM GAZE (no overlays) w/ pointer fallback ================= */
 function useWebcamGaze(stimRef){
-  const readyRef=useRef(false), lastRef=useRef(null), insideRef=useRef(false);
-  const focusedRef=useRef(0), offRef=useRef(0), crossRef=useRef(0), samplesRef=useRef(0);
-  const fallbackRef=useRef(true); // default pointer; switch off if webgazer loads
-
-  // pointer fallback
-  useEffect(()=>{
-    const onMove=(e)=>{
-      if(!fallbackRef.current) return;
-      const node=stimRef.current; if(!node) return;
-      const r=node.getBoundingClientRect(); const now=performance.now();
-      const inside=e.clientX>=r.left && e.clientX<=r.right && e.clientY>=r.top && e.clientY<=r.bottom;
-      if(lastRef.current!=null){ const dt=now-lastRef.current; if(insideRef.current) focusedRef.current+=dt; else offRef.current+=dt; }
-      if(inside!==insideRef.current) crossRef.current+=1; insideRef.current=inside; lastRef.current=now;
-    };
-    window.addEventListener("mousemove", onMove);
-    return ()=>window.removeEventListener("mousemove", onMove);
-  },[stimRef]);
-
-  // webgazer loader
-  useEffect(()=>{
-    let mounted=true, gazeListener=null;
-    const load=(src)=>new Promise((res,rej)=>{ const s=document.createElement("script"); s.src=src; s.async=true; s.onload=()=>res(); s.onerror=rej; document.head.appendChild(s); });
-    (async ()=>{
-      try{
-        if(!window.webgazer){ try{ await load("https://webgazer.cs.brown.edu/webgazer.js"); } catch { await load("https://unpkg.com/webgazer@2.1.0/build/webgazer.js"); } }
-        if(!mounted || !window.webgazer) return;
-        const wg=window.webgazer;
-        wg.setRegression("ridge").setTracker("clmtrackr");
-        if(wg.showPredictionPoints) wg.showPredictionPoints(false);
-        wg.showVideoPreview(false).showFaceOverlay(false).showFaceFeedbackBox(false);
-        await wg.begin();
-        // hard hide any overlays just in case
-        const hide=()=>{ ["webgazerGazeDot","webgazerVideoFeed","webgazerFaceOverlay","webgazerFaceFeedbackBox"].forEach(id=>{ const el=document.getElementById(id); if(el){ el.style.display="none"; el.style.opacity="0"; el.style.pointerEvents="none"; }}); document.querySelectorAll('canvas[id*="webgazer"]').forEach(cv=>{ cv.style.display="none"; cv.style.opacity="0"; }); };
-        hide(); setTimeout(hide,200); setTimeout(hide,1000);
-
-        fallbackRef.current=false; readyRef.current=true; lastRef.current=performance.now();
-        gazeListener = wg.setGazeListener((data)=>{
-          const now=performance.now(), node=stimRef.current;
-          const dt=lastRef.current!=null?(now-lastRef.current):0; lastRef.current=now;
-          if(!node || !data || typeof data.x!=="number" || typeof data.y!=="number"){ offRef.current+=dt; insideRef.current=false; return; }
-          samplesRef.current+=1;
-          const r=node.getBoundingClientRect(); const inside=data.x>=r.left && data.x<=r.right && data.y>=r.top && data.y<=r.bottom;
-          if(inside) focusedRef.current+=dt; else offRef.current+=dt;
-          if(inside!==insideRef.current) crossRef.current+=1; insideRef.current=inside;
-        });
-      }catch{/* stay in pointer fallback */}
-    })();
-    return ()=>{
-      mounted=false;
-      try{ if(window.webgazer){ if(gazeListener) window.webgazer.removeGazeListener(gazeListener); window.webgazer.end(); } }catch{}
-    };
-  },[stimRef]);
-
-  return useCallback(()=>{
-    const f=Math.round(focusedRef.current), o=Math.round(offRef.current);
-    const ratio = (f+o)>0 ? Number(((f/(f+o))*100).toFixed(2)) : "";
-    const out = {
-      "gaze_focused_ms[ms]": f,
-      "gaze_offscreen_ms[ms]": o,
-      "gaze_focus_ratio[%]": ratio,
-      "gaze_crossings[count]": crossRef.current,
-      "gaze_mode[str]": readyRef.current ? "webcam" : "pointer-fallback",
-    };
-    focusedRef.current=0; offRef.current=0; crossRef.current=0; samplesRef.current=0;
-    return out;
-  },[]);
+  // Eye tracking disabled in outputs per unified spec. Keep no-op to avoid refactor churn.
+  return useCallback(()=>({}),[]);
 }
 
 /** ================= SESSION AUDIO MANAGEMENT (one WAV for all tasks) ================= */
@@ -324,8 +257,8 @@ function TaskReading({ onDone, collect, onSchema, getRecorder }){
   const words=useMemo(()=>buildSequenceNoAdjacent(COLOR_KEYS, TRIALS_PER_TASK),[]);
   const stimRef=useRef(null); const takeGaze=useWebcamGaze(stimRef);
   const { idx,start,markStimShown,calibrating,seconds }=useTaskEngine({ part:"Reading", totalTrials:TRIALS_PER_TASK, getRecorder,
-    onRow:(base)=>{ const w=words[Math.min(Math.max(idx,0),words.length-1)]; const gaze=takeGaze();
-      const row={...base, "stimulus_type[str]":"WORD_BLACK", "stimulus_word[str]":w, "stimulus_ink_hex[str]":"#000000", ...gaze};
+    onRow:(base)=>{ const w=words[Math.min(Math.max(idx,0),words.length-1)];
+      const row={...base, "stimulus_type[str]":"WORD_BLACK", "stimulus_word[str]":w, "stimulus_ink_hex[str]":"#000000"};
       collect?.(row); onSchema?.(row); }});
   const current=idx>=0 && idx<TRIALS_PER_TASK?words[idx]:null;
   useEffect(()=>{ if(current) markStimShown(); },[current,markStimShown]);
@@ -353,8 +286,8 @@ function TaskNaming({ onDone, collect, onSchema, getRecorder }){
   const colors=useMemo(()=>buildSequenceNoAdjacent(COLOR_KEYS, TRIALS_PER_TASK),[]);
   const stimRef=useRef(null); const takeGaze=useWebcamGaze(stimRef);
   const { idx,start,markStimShown,calibrating,seconds }=useTaskEngine({ part:"Naming", totalTrials:TRIALS_PER_TASK, getRecorder,
-    onRow:(base)=>{ const c=colors[Math.min(Math.max(idx,0),colors.length-1)]; const gaze=takeGaze();
-      const row={...base, "stimulus_type[str]":"CIRCLE_COLOR", "stimulus_word[str]":"", "stimulus_ink_hex[str]":INK[c], ...gaze};
+    onRow:(base)=>{ const c=colors[Math.min(Math.max(idx,0),colors.length-1)];
+      const row={...base, "stimulus_type[str]":"CIRCLE_COLOR", "stimulus_word[str]":"", "stimulus_ink_hex[str]":INK[c]};
       collect?.(row); onSchema?.(row); }});
   const current=idx>=0 && idx<TRIALS_PER_TASK?colors[idx]:null;
   useEffect(()=>{ if(current) markStimShown(); },[current,markStimShown]);
@@ -400,8 +333,8 @@ function TaskIncongruent({ onDone, collect, onSchema, getRecorder }){
   const trials=useMemo(()=>buildIncongruentTrials(TRIALS_PER_TASK),[]);
   const stimRef=useRef(null); const takeGaze=useWebcamGaze(stimRef);
   const { idx,start,markStimShown,calibrating,seconds }=useTaskEngine({ part:"Incongruent", totalTrials:TRIALS_PER_TASK, getRecorder,
-    onRow:(base)=>{ const t=trials[Math.min(Math.max(idx,0),trials.length-1)]; const gaze=takeGaze();
-      const row={...base, "stimulus_type[str]":"WORD_INK_INCONGRUENT", "stimulus_word[str]":t.word, "stimulus_ink_hex[str]":INK[t.ink], ...gaze};
+    onRow:(base)=>{ const t=trials[Math.min(Math.max(idx,0),trials.length-1)];
+      const row={...base, "stimulus_type[str]":"WORD_INK_INCONGRUENT", "stimulus_word[str]":t.word, "stimulus_ink_hex[str]":INK[t.ink]};
       collect?.(row); onSchema?.(row); }});
   const current=idx>=0 && idx<TRIALS_PER_TASK?trials[idx]:null;
   useEffect(()=>{ if(current) markStimShown(); },[current,markStimShown]);
@@ -447,7 +380,7 @@ function StepNav({ step, setStep }){
 }
 
 /** ================= PAGE (compact CSV + single session WAV) ================= */
-export default function StroopTestPage(){
+export default function StroopTestPage({ embedded=false, onDone }){
   const [step,setStep]=useState(1);
   const [rows,setRows]=useState([]); const [schema,setSchema]=useState({});
   const [sessionBlob,setSessionBlob]=useState(null);
@@ -509,14 +442,30 @@ export default function StroopTestPage(){
     setTimeout(()=>URL.revokeObjectURL(url),0);
   };
 
+  const finishEmbedded = async ()=>{
+    let blob = sessionBlob;
+    if(!blob){ blob = await stopAndGetWav(); setSessionBlob(blob); }
+    onDone?.({ rows, sessionWav: blob });
+  };
+
+  if(embedded){
+    return (
+      <div>
+        {step===1 && (
+          <TaskReading collect={collect} onSchema={onSchema} getRecorder={getRecorder} onDone={()=>setStep(2)} />
+        )}
+        {step===2 && (
+          <TaskNaming collect={collect} onSchema={onSchema} getRecorder={getRecorder} onDone={()=>setStep(3)} />
+        )}
+        {step===3 && (
+          <TaskIncongruent collect={collect} onSchema={onSchema} getRecorder={getRecorder} onDone={finishEmbedded} />
+        )}
+      </div>
+    );
+  }
+
   return (
     <Page>
-      <style>{`
-        /* Hide any webgazer UI if the lib surfaces it */
-        #webgazerGazeDot,#webgazerVideoFeed,#webgazerFaceOverlay,#webgazerFaceFeedbackBox{display:none!important;opacity:0!important;pointer-events:none!important;}
-        canvas[id*="webgazer"]{display:none!important;opacity:0!important;}
-      `}</style>
-
       <div style={{marginBottom:18}}>
         <h1 style={{margin:0,fontSize:30,letterSpacing:0.3}}>Stroop Test</h1>
         <div style={{color:MUTED,fontSize:13,marginTop:6}}>
@@ -526,32 +475,14 @@ export default function StroopTestPage(){
       </div>
 
       {step===1 && (
-        <TaskReading
-          collect={collect}
-          onSchema={onSchema}
-          getRecorder={getRecorder}
-          onDone={()=>setStep(2)}
-        />
+        <TaskReading collect={collect} onSchema={onSchema} getRecorder={getRecorder} onDone={()=>setStep(2)} />
       )}
-
       {step===2 && (
-        <TaskNaming
-          collect={collect}
-          onSchema={onSchema}
-          getRecorder={getRecorder}
-          onDone={()=>setStep(3)}
-        />
+        <TaskNaming collect={collect} onSchema={onSchema} getRecorder={getRecorder} onDone={()=>setStep(3)} />
       )}
-
       {step===3 && (
-        <TaskIncongruent
-          collect={collect}
-          onSchema={onSchema}
-          getRecorder={getRecorder}
-          onDone={()=>setStep(4)}
-        />
+        <TaskIncongruent collect={collect} onSchema={onSchema} getRecorder={getRecorder} onDone={()=>setStep(4)} />
       )}
-
       {step>=4 && (
         <Card title="Export" subtitle="Download your data artifacts.">
           <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
@@ -559,7 +490,7 @@ export default function StroopTestPage(){
             <Button kind="secondary" onClick={downloadSessionWAV} disabled={!hasActive() && !sessionBlob}>Download Session WAV</Button>
           </div>
           <div style={{color:MUTED,fontSize:12,marginTop:8}}>
-            CSV includes per-trial timestamps, voice onset (mic), attention dwell (gaze/pointer), and optional correctness labels.
+            CSV includes per-trial timestamps, voice onset (mic), and optional correctness labels.
           </div>
         </Card>
       )}

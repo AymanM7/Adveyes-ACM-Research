@@ -5,17 +5,17 @@ import Image from "next/image";
 
 /** Card CPT (game-only) with distractors outside the letter zone */
 const CFG = {
-  BLOCKS: 4,
-  TRIALS_PER_BLOCK: 20,      // shorter while iterating
+  BLOCKS: 3,
+  TRIALS_PER_BLOCK: 10,      // shorter while iterating
   TARGET_RATE: 0.15,
   ISI_MS: 800,
-  STIM_MS_START: 4000,
+  STIM_MS_START: 1300,
   STIM_MS_MIN: 600,
-  STIM_MS_MAX: 10000,
-  ADAPT_UP_MISS: 500,
+  STIM_MS_MAX: 2500,
+  ADAPT_UP_MISS: 120,
   ADAPT_DOWN_AFTER_HITS: 3,
-  ADAPT_DOWN_STEP: 120,
-  DISTRACTOR_PROBS: { none: 0.5, notification: 0.2, pseudo: 0.2, screen: 0.1 },
+  ADAPT_DOWN_STEP: 60,
+  DISTRACTOR_PROBS: { none: 0.35, notification: 0.2, pseudo: 0.2, screen: 0.1 },
   DISTRACTOR_ONSET_MS: [120, 200],
   DISTRACTOR_DUR_MS: [1800, 2400], // longer duration for more realistic distractions
   // Notification content for realistic distractions
@@ -204,7 +204,7 @@ function r(min, max){ return Math.random() * (max - min) + min; }
 function ri(min, max){ return Math.floor(r(min, max + 1)); }
 function pick(a){ return a[Math.floor(Math.random()*a.length)]; }
 
-export default function Page(){
+export default function Page({ embedded=false, onDone, onCollect }){
   const [stage, setStage] = useState("intro"); // intro | game | break | done
   const [block, setBlock] = useState(1);
   const [trialInBlock, setTrialInBlock] = useState(0);
@@ -621,7 +621,32 @@ const makePlan = useCallback(() => {
   const downloadCSV = ()=>{
     const rows = dataRef.current; if (!rows.length) return;
     const cols = Object.keys(rows[0]);
+    const desc = {
+      participant_id: "Participant identifier",
+      block_index: "1-based block index",
+      trial_index_global: "1-based global trial",
+      trial_index_block: "1-based trial within block",
+      letter: "Stimulus card name",
+      is_target: "1 if target card",
+      has_distractor: "1 if any distractor",
+      distractor_level: "none | notification | pseudo | screen",
+      distractor_type: "Type realized at runtime",
+      distractor_onset_ms: "Distractor onset within trial",
+      distractor_duration_ms: "Distractor duration",
+      distractor_pos_px_x: "Distractor x position (if applicable)",
+      distractor_pos_px_y: "Distractor y position (if applicable)",
+      distractor_quadrant: "Reserved",
+      stim_duration_ms: "Stimulus duration",
+      isi_ms: "Inter-stimulus interval",
+      response_key: "space | none",
+      response_time_ms: "Space RT in ms (hidden in UI)",
+      is_hit: "1 hit (target + press)",
+      is_omission: "1 omission (target + no press)",
+      is_commission: "1 commission (non-target + press)",
+      timestamp_ms: "Wall clock at trial end",
+    };
     const out = [cols.join(",")];
+    out.push(cols.map(k=>desc[k]??"").join(","));
     rows.forEach((r)=>{
       out.push(cols.map(k=> (r[k]===null||r[k]===undefined)?"":String(r[k]).replace(/,/g,";")).join(","));
     });
@@ -696,10 +721,14 @@ const makePlan = useCallback(() => {
         {/* DONE */}
         <div className={`stage ${stage==="done"?"active":""}`}>
           <h2>All Done 🎉</h2>
-          <Summary data={dataRef.current} />
+          {!embedded && <Summary data={dataRef.current} />}
           <div className="row" style={{marginTop:8}}>
-            <button onClick={downloadCSV}>Download CSV</button>
-            <button onClick={()=>location.reload()}>Restart</button>
+            {!embedded && <button onClick={downloadCSV}>Download CSV</button>}
+            {embedded ? (
+              <button onClick={()=>{ onCollect?.(dataRef.current); onDone?.(); }}>Continue</button>
+            ) : (
+              <button onClick={()=>location.reload()}>Restart</button>
+            )}
           </div>
         </div>
 
