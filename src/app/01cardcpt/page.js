@@ -16,9 +16,11 @@ const CFG = {
   ADAPT_DOWN_AFTER_HITS: 3,
   ADAPT_DOWN_STEP: 60,
   // overall distractor show rate governed by 'none': show ≈ 1 - none
-  DISTRACTOR_PROBS: { none: 0.35, notification: 0.17, banner: 0.12, ripple: 0.1, screen: 0.1, shape: 0.16 },
+  DISTRACTOR_PROBS: { none: 0.1, notification: 0.20, banner: 0.15, ripple: 0.2, screen: 0.15, shape: 0.20},
   DISTRACTOR_ONSET_MS: [150, 400],
   DISTRACTOR_DUR_MS: [1500, 2800], // realistic but not overwhelming
+  // Extra concurrent spawn attempts per trial (uses same per-attempt probabilities). Increase for more presence.
+  EXTRA_SPAWN_ATTEMPTS: 1,
   // Notification content for realistic distractions
   NOTIFICATION_CONTENT: [
     { title: "New Message", body: "Sarah: Hey, are you free to chat?" },
@@ -254,6 +256,16 @@ function r(min, max){ return Math.random() * (max - min) + min; }
 function ri(min, max){ return Math.floor(r(min, max + 1)); }
 function pick(a){ return a[Math.floor(Math.random()*a.length)]; }
 
+// Helper: per-attempt distractor type picker using CFG.DISTRACTOR_PROBS.none as the only rate gate,
+// and uniform choice among the other types when shown (keeps existing behavior without changing numbers).
+function pickDistractorType() {
+  const allTypes = Object.keys(CFG.DISTRACTOR_PROBS).filter(t => t !== 'none');
+  const noneRate = Math.max(0, Math.min(1, Number(CFG.DISTRACTOR_PROBS?.none ?? 0.34)));
+  const show = Math.random() > noneRate; // show with probability 1 - noneRate
+  if (!show || allTypes.length === 0) return 'none';
+  return allTypes[Math.floor(Math.random() * allTypes.length)];
+}
+
 export default function Page(){
   const [stage, setStage] = useState("intro"); // intro | game | break | done
   const [block, setBlock] = useState(1);
@@ -270,7 +282,9 @@ export default function Page(){
   const allowRespRef = useRef(false);
   const pressTsRef = useRef(null);
   const stimStartRef = useRef(0);
-  const timers = useRef([]);
+  // Separate timers so we can keep distractors alive across trials
+  const trialTimers = useRef([]);
+  const distractorTimers = useRef([]);
   const rafRef = useRef(null);
 
   const arenaRef = useRef(null);
@@ -325,15 +339,7 @@ const makePlan = useCallback(() => {
     }
   }
 
-  // 6) Random distractor picker: preserve overall rate (based on 'none'),
-  //    but choose uniformly among all distractor types when shown.
-  const allTypes = Object.keys(CFG.DISTRACTOR_PROBS).filter(t => t !== 'none');
-  const noneRate = Math.max(0, Math.min(1, Number(CFG.DISTRACTOR_PROBS?.none ?? 0.34)));
-  const randomType = () => {
-    const show = Math.random() > noneRate; // show with probability 1 - noneRate
-    if (!show || allTypes.length === 0) return 'none';
-    return allTypes[Math.floor(Math.random() * allTypes.length)];
-  };
+  // 6) Random distractor picker (reused helper)
 
   // 7) Build the block plan
   const plan = [];
@@ -345,7 +351,7 @@ const makePlan = useCallback(() => {
       do { L = CFG.LETTERS[Math.floor(Math.random() * CFG.LETTERS.length)]; }
       while (L === CFG.TARGET);
     }
-    plan.push({ letter: L, isTarget: isT, distractorLevel: randomType() });
+    plan.push({ letter: L, isTarget: isT, distractorLevel: pickDistractorType() });
   }
   return plan;
 }, []);
@@ -406,16 +412,31 @@ const makePlan = useCallback(() => {
   },[stage, trialInBlock]);
 
   // cleanup timers
-  useEffect(()=>()=>{ timers.current.forEach(clearTimeout); if(rafRef.current) cancelAnimationFrame(rafRef.current); },[]);
+  useEffect(()=>()=>{
+    // On unmount, clear everything
+    try { trialTimers.current.forEach(id => { try { clearTimeout(id); } catch {} try { clearInterval(id); } catch {} }); } catch {}
+    try { distractorTimers.current.forEach(id => { try { clearTimeout(id); } catch {} try { clearInterval(id); } catch {} }); } catch {}
+    if(rafRef.current) cancelAnimationFrame(rafRef.current);
+  },[]);
 
+  // Full reset (between blocks or unmount): clear everything and remove distractors
   const clearTimers = useCallback(()=>{
-  // Clear both timeouts and intervals
-  timers.current.forEach(id => { try { clearTimeout(id); } catch {} try { clearInterval(id); } catch {} });
-  timers.current = [];
-  if (rafRef.current) cancelAnimationFrame(rafRef.current); rafRef.current = null;
-  // Remove all distractors from both layers
-  arenaRef.current?.querySelectorAll(".distractor").forEach(n => n.remove());
-  bgRef.current?.querySelectorAll(".distractor").forEach(n => n.remove());
+    // Clear both timeouts and intervals
+    try { trialTimers.current.forEach(id => { try { clearTimeout(id); } catch {} try { clearInterval(id); } catch {} }); } catch {}
+    try { distractorTimers.current.forEach(id => { try { clearTimeout(id); } catch {} try { clearInterval(id); } catch {} }); } catch {}
+    trialTimers.current = [];
+    distractorTimers.current = [];
+    if (rafRef.current) cancelAnimationFrame(rafRef.current); rafRef.current = null;
+    // Remove all distractors from both layers
+    arenaRef.current?.querySelectorAll(".distractor").forEach(n => n.remove());
+    bgRef.current?.querySelectorAll(".distractor").forEach(n => n.remove());
+  },[]);
+
+  // Trial-only reset: stop pending trial timeouts/animations but keep existing distractors alive
+  const clearTrialTimers = useCallback(()=>{
+    try { trialTimers.current.forEach(id => { try { clearTimeout(id); } catch {} try { clearInterval(id); } catch {} }); } catch {}
+    trialTimers.current = [];
+    if (rafRef.current) cancelAnimationFrame(rafRef.current); rafRef.current = null;
   },[]);
 
   const startTask = ()=>{
@@ -429,7 +450,7 @@ const makePlan = useCallback(() => {
     planRef.current = makePlan();
     idxRef.current = 0;
     setTargetsLeft(Math.round(CFG.TRIALS_PER_BLOCK * CFG.TARGET_RATE));
-    timers.current.push(window.setTimeout(nextTrial, 400));
+    trialTimers.current.push(window.setTimeout(nextTrial, 400));
   };
 
   const nextBlock = ()=>{
@@ -439,7 +460,7 @@ const makePlan = useCallback(() => {
     setTrialInBlock(0);
     setTargetsLeft(Math.round(CFG.TRIALS_PER_BLOCK * CFG.TARGET_RATE));
     setStage("game");
-    timers.current.push(window.setTimeout(nextTrial, 400));
+    trialTimers.current.push(window.setTimeout(nextTrial, 400));
   };
 
   const endBlock = ()=>{
@@ -450,11 +471,12 @@ const makePlan = useCallback(() => {
   };
 
   const nextTrial = ()=>{
-    clearTimers();
+    // Only clear trial timers so existing distractors can persist across trials
+    clearTrialTimers();
     setLetter(null);
     allowRespRef.current = false;
     pressTsRef.current = null;
-    timers.current.push(window.setTimeout(runStimulus, CFG.ISI_MS));
+    trialTimers.current.push(window.setTimeout(runStimulus, CFG.ISI_MS));
   };
 
   const runStimulus = ()=>{
@@ -474,13 +496,21 @@ const makePlan = useCallback(() => {
     let dParams = null;
     if (plan.distractorLevel !== "none") {
       const onset = Math.round(r(...CFG.DISTRACTOR_ONSET_MS));
-      // Randomize distractor duration using configured range
       const dur = Math.round(r(...CFG.DISTRACTOR_DUR_MS));
       dParams = spawnDistractor(plan.distractorLevel, onset, dur);
     }
+    // Extra concurrent spawn attempts (do not change per-attempt probabilities)
+    const extra = Math.max(0, Number(CFG.EXTRA_SPAWN_ATTEMPTS) | 0);
+    for (let k = 0; k < extra; k++) {
+      const t = pickDistractorType();
+      if (t === 'none') continue;
+      const onset = Math.round(r(...CFG.DISTRACTOR_ONSET_MS));
+      const dur = Math.round(r(...CFG.DISTRACTOR_DUR_MS));
+      spawnDistractor(t, onset, dur);
+    }
 
     const endT = window.setTimeout(()=> finishTrial(plan, dParams), stimMs);
-    timers.current.push(endT);
+    trialTimers.current.push(endT);
   };
 
   const finishTrial = (plan, dParams)=>{
@@ -824,7 +854,33 @@ const makePlan = useCallback(() => {
       placed = true;
       break;
     }
-    if (!placed) return null;
+    // Fallback: try random safe positions allowing overlap with other distractors (but not with card/HUD)
+    if (!placed) {
+      const width = el._w || (el.classList.contains('notification') ? 280 : (type === 'screen' ? W : 0));
+      const height = el._h || (el.classList.contains('notification') ? 80 : (type === 'screen' ? H : 0));
+      let tries = 0;
+      while (tries++ < 40 && !placed) {
+        const x = ri(12, Math.max(12, W - width - 12));
+        const y = ri(Math.max(12, hudRect.bottom + 8), Math.max(12, H - height - 12));
+        const rect = {left:x, top:y, right:x+width, bottom:y+height};
+        if (forbiddenRects.some(f => overlaps(rect, f))) continue;
+        // allow overlap with other distractors in fallback
+        el.style.left = `${x}px`;
+        el.style.top = `${y}px`;
+        chosenPos = { x, y };
+        const cxL = cardRect.left - wrapRect.left;
+        const cxR = cardRect.right - wrapRect.left;
+        const cyT = cardRect.top - wrapRect.top;
+        const cyB = cardRect.bottom - wrapRect.top;
+        if (rect.bottom <= cyT) chosenQuadrant = 'top';
+        else if (rect.top >= cyB) chosenQuadrant = 'bottom';
+        else if (rect.right <= cxL) chosenQuadrant = 'left';
+        else if (rect.left >= cxR) chosenQuadrant = 'right';
+        else chosenQuadrant = 'around';
+        placed = true;
+      }
+      if (!placed) return null;
+    }
 
     bgEl.appendChild(el);
 
@@ -846,19 +902,19 @@ const makePlan = useCallback(() => {
           el._moveShape();
           const pause = ri(500, 1200); // random pause between moves
           const id = window.setTimeout(scheduleMove, pause);
-          timers.current.push(id);
+          distractorTimers.current.push(id);
         };
         // Kick off soon after appear
         const firstId = window.setTimeout(scheduleMove, 80);
-        timers.current.push(firstId);
+        distractorTimers.current.push(firstId);
       }
       const endTimer = window.setTimeout(() => {
         el.style.opacity = "0";
         setTimeout(() => el.remove(), 300);
       }, durMs);
-      timers.current.push(endTimer);
+      distractorTimers.current.push(endTimer);
     }, onsetMs);
-    timers.current.push(startTimer);
+    distractorTimers.current.push(startTimer);
     return { type: type, onset: onsetMs, duration: durMs, x: chosenPos?.x ?? null, y: chosenPos?.y ?? null, quadrant: chosenQuadrant };
   };
 
