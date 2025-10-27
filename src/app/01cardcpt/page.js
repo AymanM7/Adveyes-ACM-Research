@@ -16,9 +16,11 @@ const CFG = {
   ADAPT_DOWN_AFTER_HITS: 3,
   ADAPT_DOWN_STEP: 60,
   // overall distractor show rate governed by 'none': show ≈ 1 - none
-  DISTRACTOR_PROBS: { none: 0.1, notification: 0.20, banner: 0.15, ripple: 0.2, screen: 0.15, shape: 0.20},
+  // Probabilities sum to 1.0 (rounded), preserving previous relative proportions
+  DISTRACTOR_PROBS: { none: 0.08, notification: 0.17, banner: 0.12, ripple: 0.17, screen: 0.12, shape: 0.17, falsecard: 0.17 },
   DISTRACTOR_ONSET_MS: [150, 400],
   DISTRACTOR_DUR_MS: [1500, 2800], // realistic but not overwhelming
+  FALSECARD_DUR_MS: [900, 1600],   // shorter screen time for false-card distractor
   // Extra concurrent spawn attempts per trial (uses same per-attempt probabilities). Increase for more presence.
   EXTRA_SPAWN_ATTEMPTS: 1,
   // Notification content for realistic distractions
@@ -203,6 +205,13 @@ button:hover{ background:#2a2e35; }
   z-index:1;
 }
 
+/* False-card distractor (mini card image) */
+.distractor.false-card{
+  border-radius:12px;
+  box-shadow:0 10px 28px rgba(0,0,0,0.40), 0 2px 8px rgba(0,0,0,0.25);
+  overflow:hidden;
+}
+
 /* Banner (sliding info) */
 .distractor.banner{
   background:#1f2328;
@@ -256,14 +265,17 @@ function r(min, max){ return Math.random() * (max - min) + min; }
 function ri(min, max){ return Math.floor(r(min, max + 1)); }
 function pick(a){ return a[Math.floor(Math.random()*a.length)]; }
 
-// Helper: per-attempt distractor type picker using CFG.DISTRACTOR_PROBS.none as the only rate gate,
-// and uniform choice among the other types when shown (keeps existing behavior without changing numbers).
+// Helper: weighted picker over CFG.DISTRACTOR_PROBS that sum to 1.0 (includes 'none').
 function pickDistractorType() {
-  const allTypes = Object.keys(CFG.DISTRACTOR_PROBS).filter(t => t !== 'none');
-  const noneRate = Math.max(0, Math.min(1, Number(CFG.DISTRACTOR_PROBS?.none ?? 0.34)));
-  const show = Math.random() > noneRate; // show with probability 1 - noneRate
-  if (!show || allTypes.length === 0) return 'none';
-  return allTypes[Math.floor(Math.random() * allTypes.length)];
+  const probs = CFG.DISTRACTOR_PROBS || {};
+  const entries = Object.entries(probs).filter(([k,v]) => typeof v === 'number' && v > 0);
+  if (!entries.length) return 'none';
+  const total = entries.reduce((s, [,v]) => s + v, 0);
+  let x = Math.random() * total;
+  for (const [k, v] of entries) {
+    if ((x -= v) <= 0) return k;
+  }
+  return entries[entries.length - 1][0];
 }
 
 export default function Page(){
@@ -575,7 +587,7 @@ const makePlan = useCallback(() => {
     const cardEl = cardRef.current;
     if (!arenaEl || !bgEl || !cardEl) return null;
 
-    const wrapRect = bgEl.getBoundingClientRect();
+  const wrapRect = bgEl.getBoundingClientRect();
     const cardRect = cardEl.getBoundingClientRect();
     const W = wrapRect.width;
     const H = wrapRect.height;
@@ -594,17 +606,17 @@ const makePlan = useCallback(() => {
       };
     }
 
-    // Forbidden zones: card + HUD
+    // Forbidden zones
     const PAD = 20;
-    const forbiddenRects = [
-      {
-        left: clamp(cardRect.left - wrapRect.left - PAD, 0, W),
-        top: clamp(cardRect.top - wrapRect.top - PAD, 0, H),
-        right: clamp(cardRect.right - wrapRect.left + PAD, 0, W),
-        bottom: clamp(cardRect.bottom - wrapRect.top + PAD, 0, H)
-      },
-      hudRect
-    ];
+    // Card area with padding is always forbidden
+    const cardForbiddenRect = {
+      left: clamp(cardRect.left - wrapRect.left - PAD, 0, W),
+      top: clamp(cardRect.top - wrapRect.top - PAD, 0, H),
+      right: clamp(cardRect.right - wrapRect.left + PAD, 0, W),
+      bottom: clamp(cardRect.bottom - wrapRect.top + PAD, 0, H)
+    };
+    // Default forbidden: card + HUD; for falsecard we will ignore the HUD
+    const forbiddenRects = [cardForbiddenRect, hudRect];
 
     // Track active distractors to avoid overlap
     const activeRects = Array.from(bgEl.querySelectorAll('.distractor')).map(d => {
@@ -622,7 +634,7 @@ const makePlan = useCallback(() => {
       return !(r1.right < r2.left || r1.left > r2.right || r1.bottom < r2.top || r1.top > r2.bottom);
     }
 
-    const el = document.createElement("div");
+  const el = document.createElement("div");
     el.className = "distractor";
 
   // Configure distractor based on type
@@ -671,6 +683,48 @@ const makePlan = useCallback(() => {
         break;
       }
       // ...other distractor cases remain unchanged...
+      case "falsecard": {
+        // A mini playing card that can overlap HUD but never the central card
+        el.className += " false-card";
+        const width = 190; // reduced again by 50x50 from previous 240x320
+        const height = 270;
+        el._w = width; el._h = height;
+        // choose a random card image from public/cards
+        const imgSrc = pick(CFG.LETTERSARRAY);
+        el.innerHTML = `<img src="${imgSrc}" alt="false card" width="${width}" height="${height}" style="display:block;" />`;
+
+        // Build safe lobes around the card (top/bottom/left/right). HUD is allowed.
+        const margin = 12;
+        const forbid = {
+          left: clamp(cardRect.left - wrapRect.left, 0, W),
+          top: clamp(cardRect.top - wrapRect.top, 0, H),
+          right: clamp(cardRect.right - wrapRect.left, 0, W),
+          bottom: clamp(cardRect.bottom - wrapRect.top, 0, H),
+        };
+        const lobes = [];
+        // top lobe (above card)
+        if (forbid.top - height - margin > margin)
+          lobes.push({ xMin: margin, xMax: W - width - margin, yMin: margin, yMax: forbid.top - height - margin });
+        // bottom lobe (below card)
+        if (H - forbid.bottom - height - margin > margin)
+          lobes.push({ xMin: margin, xMax: W - width - margin, yMin: forbid.bottom + margin, yMax: H - height - margin });
+        // left lobe (left of card)
+        if (forbid.left - width - margin > margin)
+          lobes.push({ xMin: margin, xMax: forbid.left - width - margin, yMin: margin, yMax: H - height - margin });
+        // right lobe (right of card)
+        if (W - forbid.right - width - margin > margin)
+          lobes.push({ xMin: forbid.right + margin, xMax: W - width - margin, yMin: margin, yMax: H - height - margin });
+
+        candidatePositions = [];
+        for (let i = 0; i < 10; i++) {
+          const R = pick(lobes);
+          if (!R) break;
+          const x = ri(R.xMin, Math.max(R.xMin, R.xMax));
+          const y = ri(R.yMin, Math.max(R.yMin, R.yMax));
+          candidatePositions.push({ x, y });
+        }
+        break;
+      }
       case "screen": {
         el.className += " screen-effect";
         el.style.opacity = "0.15";
@@ -824,17 +878,19 @@ const makePlan = useCallback(() => {
       }
     }
 
-    // Try to find a non-overlapping position
+  // Try to find a non-overlapping position
     let placed = false;
     let chosenPos = null;
     let chosenQuadrant = null;
+    // Respect HUD for all types except falsecard
+    const forbRects = type === "falsecard" ? [cardForbiddenRect] : forbiddenRects;
     for (const pos of candidatePositions) {
       // Estimate distractor rect
       const width = el._w || (el.classList.contains('notification') ? 280 : (type === 'screen' ? W : 0));
       const height = el._h || (el.classList.contains('notification') ? 80 : (type === 'screen' ? H : 0));
       const rect = {left:pos.x,top:pos.y,right:pos.x+width,bottom:pos.y+height};
       // Check forbidden zones
-      if (forbiddenRects.some(f => overlaps(rect, f))) continue;
+      if (forbRects.some(f => overlaps(rect, f))) continue;
       // Check active distractors
       if (activeRects.some(a => overlaps(rect, a))) continue;
       // Place here
@@ -861,9 +917,11 @@ const makePlan = useCallback(() => {
       let tries = 0;
       while (tries++ < 40 && !placed) {
         const x = ri(12, Math.max(12, W - width - 12));
-        const y = ri(Math.max(12, hudRect.bottom + 8), Math.max(12, H - height - 12));
+        // If falsecard, allow spawning anywhere vertically (including HUD), otherwise avoid HUD
+        const yMin = type === "falsecard" ? 12 : Math.max(12, hudRect.bottom + 8);
+        const y = ri(yMin, Math.max(12, H - height - 12));
         const rect = {left:x, top:y, right:x+width, bottom:y+height};
-        if (forbiddenRects.some(f => overlaps(rect, f))) continue;
+        if (forbRects.some(f => overlaps(rect, f))) continue;
         // allow overlap with other distractors in fallback
         el.style.left = `${x}px`;
         el.style.top = `${y}px`;
@@ -884,6 +942,12 @@ const makePlan = useCallback(() => {
 
     bgEl.appendChild(el);
 
+    // Determine effective duration (shorter for falsecard)
+    let effDurMs = durMs;
+    if (type === "falsecard" && Array.isArray(CFG.FALSECARD_DUR_MS)) {
+      try { effDurMs = Math.round(r(...CFG.FALSECARD_DUR_MS)); } catch { /* keep durMs */ }
+    }
+
     // Animate in/out with proper timing
     const startTimer = window.setTimeout(() => {
       el.style.opacity = type === "screen" ? "0.15" : "1";
@@ -891,12 +955,12 @@ const makePlan = useCallback(() => {
         requestAnimationFrame(() => { el.classList.add('show'); });
       }
       if (type === 'ripple') {
-        el.style.animation = `rippleExpand ${Math.max(600, Math.min(1400, durMs - 300))}ms ease-out forwards`;
+        el.style.animation = `rippleExpand ${Math.max(600, Math.min(1400, effDurMs - 300))}ms ease-out forwards`;
       }
       // If shape, animate movement every ~1.2s, 2-3 times
       if (type === "shape") {
         // Recursive scheduler for natural cadence with random pauses
-        const tEnd = performance.now() + durMs - 200; // stop a bit early for fade
+        const tEnd = performance.now() + effDurMs - 200; // stop a bit early for fade
         const scheduleMove = () => {
           if (performance.now() > tEnd) return;
           el._moveShape();
@@ -911,11 +975,11 @@ const makePlan = useCallback(() => {
       const endTimer = window.setTimeout(() => {
         el.style.opacity = "0";
         setTimeout(() => el.remove(), 300);
-      }, durMs);
+      }, effDurMs);
       distractorTimers.current.push(endTimer);
     }, onsetMs);
     distractorTimers.current.push(startTimer);
-    return { type: type, onset: onsetMs, duration: durMs, x: chosenPos?.x ?? null, y: chosenPos?.y ?? null, quadrant: chosenQuadrant };
+    return { type: type, onset: onsetMs, duration: effDurMs, x: chosenPos?.x ?? null, y: chosenPos?.y ?? null, quadrant: chosenQuadrant };
   };
 
   const downloadCSV = ()=>{
