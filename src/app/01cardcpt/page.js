@@ -369,7 +369,16 @@ const makePlan = useCallback(() => {
   bgRef.current?.querySelectorAll(".distractor").forEach(n => n.remove());
   },[]);
 
-  const startTask = ()=>{
+   const startTask = async ()=>{
+
+  const startEyeTracking = async () => {
+    const res = await fetch("/api/eye-tracking/start", { method: "POST" });
+    const data = await res.json();
+    console.log(data);
+  };
+  await startEyeTracking();
+
+
     dataRef.current = [];
     setStage("game");
     setBlock(1);
