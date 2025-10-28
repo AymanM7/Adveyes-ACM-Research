@@ -18,4 +18,3 @@ pyperclip==1.11.0
 PyRect==0.2.0
 pytweening==1.2.0
 six==1.17.0
-websockets==15.0.1
