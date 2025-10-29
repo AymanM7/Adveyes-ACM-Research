@@ -1,4 +1,4 @@
-﻿"use client";
+﻿"use client"; 
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -10,6 +10,8 @@ const ACCENT = "#7C3AED", ACCENT_SOFT = "#A78BFA";
 
 /** ================= PROTOCOL CONSTANTS ================= */
 const TRIALS_PER_TASK = 23;
+const TRIAL_DURATION_MS = 2000; // 2 seconds per trial (hidden timer)
+const POST_SPEECH_ADVANCE_DELAY_MS = 300; // wait this long after speech ends before advancing
 const CALIBRATION_WINDOW_MS = 1000;
 const CIRCLE_JITTER_INTERVAL_MS = 40;
 const JITTER_PX = 12;
@@ -58,11 +60,6 @@ const Pill = ({ children }) => (
     {children}
   </span>
 );
-const BigTimer = ({ seconds }) => {
-  const m = Math.floor(seconds/60), s = String(seconds%60).padStart(2,"0");
-  return <div style={{fontSize:"3.0rem",fontWeight:300,color:TEXT,textAlign:"center",margin:"6px 0 10px",fontVariantNumeric:"tabular-nums",textShadow:"0 2px 12px rgba(0,0,0,0.35)"}}>{m}:{s}</div>;
-};
-
 /** ================= HELPERS ================= */
 const shuffled = (a) => { const x=[...a]; for(let i=x.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [x[i],x[j]]=[x[j],x[i]];} return x; };
 function buildSequenceNoAdjacent(labels,n){
@@ -80,6 +77,52 @@ function buildIncongruentTrials(n){
 }
 const toISO = (ms)=>new Date(ms).toISOString();
 
+function audioBufferToWav(buffer){
+  const numChannels = buffer.numberOfChannels || 1;
+  const sampleRate = buffer.sampleRate || 44100;
+  const numFrames = buffer.length;
+
+  const interleaved = new Float32Array(numFrames * numChannels);
+  for(let channel=0; channel<numChannels; channel++){
+    const channelData = buffer.getChannelData(channel);
+    for(let i=0; i<numFrames; i++){
+      interleaved[i*numChannels + channel] = channelData[i];
+    }
+  }
+
+  const bytesPerSample = 2;
+  const blockAlign = numChannels * bytesPerSample;
+  const bufferLength = 44 + interleaved.length * bytesPerSample;
+  const view = new DataView(new ArrayBuffer(bufferLength));
+
+  let offset = 0;
+  const writeString = (str)=>{ for(let i=0;i<str.length;i++) view.setUint8(offset+i, str.charCodeAt(i)); offset+=str.length; };
+  const writeUint32 = (data)=>{ view.setUint32(offset, data, true); offset+=4; };
+  const writeUint16 = (data)=>{ view.setUint16(offset, data, true); offset+=2; };
+
+  writeString("RIFF");
+  writeUint32(bufferLength - 8);
+  writeString("WAVE");
+  writeString("fmt ");
+  writeUint32(16);
+  writeUint16(1);
+  writeUint16(numChannels);
+  writeUint32(sampleRate);
+  writeUint32(sampleRate * blockAlign);
+  writeUint16(blockAlign);
+  writeUint16(bytesPerSample * 8);
+  writeString("data");
+  writeUint32(interleaved.length * bytesPerSample);
+
+  for(let i=0;i<interleaved.length;i++){
+    const sample = Math.max(-1, Math.min(1, interleaved[i]));
+    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+    offset+=2;
+  }
+
+  return view.buffer;
+}
+
 /** ================= SESSION AUDIO RECORDER ================= */
 class SessionRecorder {
   constructor(){
@@ -89,7 +132,7 @@ class SessionRecorder {
     this.rafId = null;
     this.mediaRecorder = null;
     this.chunks = [];
-    this.mimeType = "audio/webm";
+  this.mimeType = "audio/webm";
     this.rmsListeners = new Set();
   }
 
@@ -165,7 +208,7 @@ class SessionRecorder {
     this.rafId = null;
 
     const rec = this.mediaRecorder;
-    const done = new Promise((resolve)=>{
+    const recordingPromise = new Promise((resolve)=>{
       rec.onstop = () => resolve(new Blob(this.chunks, { type: this.mimeType }));
     });
     if(rec.state !== "inactive") rec.stop();
@@ -176,11 +219,36 @@ class SessionRecorder {
     try{ await this.ctx?.close(); }catch{}
     this.ctx = null; this.analyser = null;
 
-    return await done;
+    const originalBlob = await recordingPromise;
+    let wavBlob = originalBlob;
+    let audioCtx=null;
+    try{
+      const arrayBuffer = await originalBlob.arrayBuffer();
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AudioCtx();
+      const audioBuffer = await new Promise((resolve,reject)=>{
+        audioCtx.decodeAudioData(arrayBuffer, resolve, reject);
+      });
+      const wavBuffer = audioBufferToWav(audioBuffer);
+      wavBlob = new Blob([wavBuffer], { type: "audio/wav" });
+      this.mimeType = "audio/wav";
+    }catch(err){
+      console.error("Failed to convert audio to WAV, returning original format", err);
+    }finally{
+      if(audioCtx){ try{ await audioCtx.close(); }catch{} }
+    }
+
+    this.mediaRecorder = null;
+    this.chunks = [];
+
+    return wavBlob;
   }
 
   getExtension(){
-    return this.mimeType.includes("webm") ? "webm" : "mp4";
+    const type = this.mimeType ?? "";
+    if(type.includes("wav")) return "wav";
+    if(type.includes("mp4")) return "mp4";
+    return "webm";
   }
 }
 
@@ -198,42 +266,70 @@ function exportCSV(filename, rows, descriptions){
 }
 
 /** ================= SESSION AUDIO HOOK ================= */
+const inferExtension = (type, fallback="webm") => {
+  const mime = (type ?? "").toLowerCase();
+  if(mime.includes("wav")) return "wav";
+  if(mime.includes("mpeg")) return "mp3";
+  if(mime.includes("mp3")) return "mp3";
+  if(mime.includes("mp4") || mime.includes("m4a")) return "mp4";
+  if(mime.includes("ogg")) return "ogg";
+  if(mime.includes("webm")) return "webm";
+  return fallback;
+};
+
 function useSessionAudio(){
   const recRef = useRef(null);
+  const lastExtRef = useRef("webm");
   const getRecorder = useCallback(async ()=>{
-    if(!recRef.current){ const mr=new SessionRecorder(); await mr.start(); recRef.current=mr; }
+    if(!recRef.current){
+      const mr=new SessionRecorder();
+      await mr.start();
+      recRef.current=mr;
+      lastExtRef.current = mr.getExtension();
+    }
     return recRef.current;
   },[]);
   const stopAndGetAudio = useCallback(async ()=>{
-    if(!recRef.current) return null;
-    const blob = await recRef.current.stop(); recRef.current=null; return blob;
+    const recorder = recRef.current;
+    if(!recorder) return null;
+    const blob = await recorder.stop();
+    lastExtRef.current = inferExtension(blob?.type, recorder.getExtension());
+    recRef.current=null;
+    return blob;
   },[]);
   const hasActive = useCallback(()=>!!recRef.current,[]);
   const getExtension = useCallback(()=>{
-    return recRef.current ? recRef.current.getExtension() : "webm";
+    return recRef.current ? recRef.current.getExtension() : lastExtRef.current;
   },[]);
   return { getRecorder, stopAndGetAudio, hasActive, getExtension };
 }
 
 /** ================= TASK ENGINE ================= */
 function useTaskEngine({ part, totalTrials, getRecorder, onRow, expectedStimulus }){
-  const [idx,setIdx]=useState(-1), [calibrating,setCalibrating]=useState(false), [seconds,setSeconds]=useState(0);
-  const timerRef=useRef(null);
+  const [idx,setIdx]=useState(-1), [calibrating,setCalibrating]=useState(false);
   const stimStartRef=useRef(null), voiceOnsetMsRef=useRef(null), speakingBeforeStimRef=useRef(false);
   const baselineRef=useRef({mean:0,std:0,thresh:0.02}), movingMeanRef=useRef(0), alpha=0.1;
   const trialStartPerfRef=useRef(null), trialBurstsRef=useRef(0), prevVoicedRef=useRef(false);
   const unsubRef=useRef(()=>{});
+  const hasAdvancedRef=useRef(false);
+  const maxTimerRef=useRef(null);
+  const silenceTimerRef=useRef(null);
+  const trialTokenRef=useRef(0);
 
   const resetAcc=()=>{ 
     trialBurstsRef.current=0; prevVoicedRef.current=false; 
   };
 
+  const cleanupTrial = useCallback(()=>{
+    if(maxTimerRef.current){ clearTimeout(maxTimerRef.current); maxTimerRef.current=null; }
+    if(silenceTimerRef.current){ clearTimeout(silenceTimerRef.current); silenceTimerRef.current=null; }
+    try{ unsubRef.current(); }catch{}
+    unsubRef.current=()=>{};
+  },[]);
+
   const start = useCallback(async ()=>{
     const mr = await getRecorder();
-    
-    setSeconds(0); clearInterval(timerRef.current); timerRef.current=setInterval(()=>setSeconds(s=>s+1),1000);
 
-    // Calibration
     setCalibrating(true);
     const samples=[]; const unsub=mr.onRms(({rms})=>samples.push(rms));
     const t0=performance.now(); while(performance.now()-t0<CALIBRATION_WINDOW_MS){ await new Promise(r=>setTimeout(r,50)); }
@@ -248,86 +344,110 @@ function useTaskEngine({ part, totalTrials, getRecorder, onRow, expectedStimulus
     setIdx(0);
   },[getRecorder]);
 
-  const markStimShown = useCallback(async ()=>{
-    const mr = await getRecorder();
-    
-    stimStartRef.current=performance.now(); 
-    trialStartPerfRef.current=stimStartRef.current;
-    voiceOnsetMsRef.current=null; 
-    speakingBeforeStimRef.current=false; 
-    resetAcc();
+  const beginTrial = useCallback(()=>{
+    if(idx<0 || idx>=totalTrials) return ()=>{};
 
-    unsubRef.current = mr.onRms(({rms,durationMs})=>{
-      movingMeanRef.current=(1-alpha)*movingMeanRef.current+alpha*rms;
+    const token = ++trialTokenRef.current;
+    const trialIdx = idx;
 
-      const voiced = rms>baselineRef.current.thresh || movingMeanRef.current>baselineRef.current.thresh;
-      
-      if(stimStartRef.current==null){ 
-        if(voiced) speakingBeforeStimRef.current=true; 
-      }
-      else{
-        if(voiceOnsetMsRef.current==null && voiced){ 
-          voiceOnsetMsRef.current=performance.now()-stimStartRef.current; 
-          trialBurstsRef.current+=1; 
-          prevVoicedRef.current=true; 
-        }
-        else if(voiced){ 
-          if(!prevVoicedRef.current){ 
-            trialBurstsRef.current+=1; 
-            prevVoicedRef.current=true; 
-          } 
-        }
-        else { 
-          prevVoicedRef.current=false; 
-        }
-      }
-    });
-  },[getRecorder]);
+    cleanupTrial();
+    hasAdvancedRef.current=false;
 
-  useEffect(()=>{
-    if(idx<0 || idx>=totalTrials) return;
-    
-    const onKey=async (e)=>{
-      if(e.key===" "){
-        e.preventDefault();
-        
+    (async ()=>{
+      const mr = await getRecorder();
+      if(trialTokenRef.current !== token) return;
+
+      stimStartRef.current=performance.now();
+      trialStartPerfRef.current=stimStartRef.current;
+      voiceOnsetMsRef.current=null;
+      speakingBeforeStimRef.current=false;
+      resetAcc();
+
+      const stimulus = expectedStimulus ? expectedStimulus(trialIdx) : "";
+
+      const advanceTrial = () => {
+        if(trialTokenRef.current !== token || hasAdvancedRef.current) return;
+        hasAdvancedRef.current=true;
+
+        cleanupTrial();
+
         const now=performance.now();
         const trialDur=Math.round(now-(trialStartPerfRef.current??now));
         const timestampISO = new Date().toISOString();
-        
-        try{ unsubRef.current(); }catch{}
-        
-        const stimulus = expectedStimulus ? expectedStimulus(idx) : "";
-        
+
         const baseRow={
-          "task":part, 
-          "trial_number": idx + 1,
+          "task":part,
+          "trial_number": trialIdx + 1,
           "timestamp_iso":timestampISO,
           "stimulus_shown": stimulus,
           "voice_onset_rt_ms": voiceOnsetMsRef.current ?? "",
           "response_duration_ms":trialDur,
           "speech_bursts": trialBurstsRef.current,
         };
-        
+
         onRow?.(baseRow);
-        
-        if(idx+1>=totalTrials){ 
-          setIdx(totalTrials);
+
+        setIdx(prev=>{
+          if(prev!==trialIdx) return prev;
+          if(trialIdx+1>=totalTrials) return totalTrials;
+          return trialIdx+1;
+        });
+      };
+
+      maxTimerRef.current=setTimeout(advanceTrial, TRIAL_DURATION_MS);
+
+      unsubRef.current = mr.onRms(({rms})=>{
+        if(trialTokenRef.current !== token || hasAdvancedRef.current) return;
+
+        movingMeanRef.current=(1-alpha)*movingMeanRef.current+alpha*rms;
+
+        const voiced = rms>baselineRef.current.thresh || movingMeanRef.current>baselineRef.current.thresh;
+
+        if(stimStartRef.current==null){
+          if(voiced) speakingBeforeStimRef.current=true;
         } else {
-          setIdx(n=>n+1);
+          if(voiceOnsetMsRef.current==null && voiced){
+            voiceOnsetMsRef.current=performance.now()-stimStartRef.current;
+            trialBurstsRef.current+=1;
+            prevVoicedRef.current=true;
+            if(silenceTimerRef.current){ clearTimeout(silenceTimerRef.current); silenceTimerRef.current=null; }
+          }
+          else if(voiced){
+            if(!prevVoicedRef.current){
+              trialBurstsRef.current+=1;
+              prevVoicedRef.current=true;
+            }
+            if(silenceTimerRef.current){ clearTimeout(silenceTimerRef.current); silenceTimerRef.current=null; }
+          }
+          else {
+            prevVoicedRef.current=false;
+            if(voiceOnsetMsRef.current!=null){
+              if(silenceTimerRef.current){ clearTimeout(silenceTimerRef.current); }
+              silenceTimerRef.current=setTimeout(()=>{
+                if(trialTokenRef.current !== token) return;
+                advanceTrial();
+              }, POST_SPEECH_ADVANCE_DELAY_MS);
+            }
+          }
         }
+      });
+    })();
+
+    return () => {
+      if(trialTokenRef.current === token){
+        trialTokenRef.current++;
       }
+      cleanupTrial();
+      hasAdvancedRef.current=false;
     };
-    window.addEventListener("keydown", onKey);
-    return ()=>window.removeEventListener("keydown", onKey);
-  },[idx,totalTrials,part,onRow,expectedStimulus]);
+  },[idx,totalTrials,getRecorder,expectedStimulus,part,onRow,cleanupTrial]);
 
-  useEffect(()=>()=>{ 
-    clearInterval(timerRef.current); 
-    try{ unsubRef.current(); }catch{} 
-  },[]);
+  useEffect(()=>()=>{
+    trialTokenRef.current++;
+    cleanupTrial();
+  },[cleanupTrial]);
 
-  return { idx,start,markStimShown,calibrating,seconds };
+  return { idx,start,beginTrial,calibrating };
 }
 
 /** ================= INSTRUCTIONS ================= */
@@ -335,10 +455,9 @@ const Instructions = () => (
   <div style={{background:"rgba(255,255,255,0.06)",padding:"12px 14px",borderRadius:14,borderLeft:`4px solid ${ACCENT_SOFT}`}}>
     <div style={{fontSize:13,color:MUTED,lineHeight:1.7}}>
       <div><b>Instructions</b></div>
-      <div>• Answer out loud, then press <b>SPACE</b> to advance</div>
-      <div>• Allow microphone permission when prompted</div>
-      <div>• Speak clearly in a quiet environment</div>
-      <div>• Session is recorded for analysis</div>
+  <div>• Answer out loud. The task advances automatically.</div>
+      <div>• Allow microphone and camera permissions.</div>
+      <div>• Keep the room quiet and your face visible to the camera.</div>
     </div>
   </div>
 );
@@ -346,22 +465,26 @@ const Instructions = () => (
 /** ================= TASKS ================= */
 function TaskReading({ onDone, collect, getRecorder }){
   const words=useMemo(()=>buildSequenceNoAdjacent(COLOR_KEYS, TRIALS_PER_TASK),[]);
+  const expectedStimulus=useCallback((i)=>words[Math.min(i, words.length-1)], [words]);
   const stimRef=useRef(null);
-  const { idx,start,markStimShown,calibrating,seconds }=useTaskEngine({ 
+  const handleRow=useCallback((base)=>{ collect?.(base); },[collect]);
+  const { idx,start,beginTrial,calibrating }=useTaskEngine({ 
     part:"Reading", 
     totalTrials:TRIALS_PER_TASK,
     getRecorder,
-    expectedStimulus: (i) => words[Math.min(i, words.length-1)],
-    onRow:(base)=>{ 
-      collect?.(base);
-    }
+    expectedStimulus,
+    onRow:handleRow
   });
   const current=idx>=0 && idx<TRIALS_PER_TASK?words[idx]:null;
-  useEffect(()=>{ if(current) markStimShown(); },[current,markStimShown]);
+  useEffect(()=>{
+    if(!current || idx<0 || idx>=TRIALS_PER_TASK) return;
+    const cancel = beginTrial();
+    return ()=>{ cancel(); };
+  },[current,idx,beginTrial]);
   const done=idx>=TRIALS_PER_TASK;
 
   return (
-    <Card title="Task 1 — Baseline Reading" subtitle="Say the printed word (black ink). Press SPACE to advance.">
+    <Card title="Task 1 — Baseline Reading" subtitle="Say the printed word (black ink).">
       {idx<0 && (
         <div style={{display:"grid",gap:12}}>
           <Instructions/>
@@ -371,7 +494,6 @@ function TaskReading({ onDone, collect, getRecorder }){
       )}
       {current && !done && (
         <div style={{display:"grid",gap:10}}>
-          <BigTimer seconds={seconds}/>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <Pill>Trial {idx+1} / {TRIALS_PER_TASK}</Pill>
           </div>
@@ -380,7 +502,7 @@ function TaskReading({ onDone, collect, getRecorder }){
               {current}
             </div>
           </div>
-          <div style={{color:MUTED,fontSize:12,textAlign:"center"}}>Speak, then press SPACE.</div>
+          <div style={{color:MUTED,fontSize:12,textAlign:"center"}}>Speak your answer clearly.</div>
         </div>
       )}
       {done && (<div style={{display:"grid",gap:10,marginTop:8}}><Button onClick={onDone} full>Next Task →</Button></div>)}
@@ -390,18 +512,22 @@ function TaskReading({ onDone, collect, getRecorder }){
 
 function TaskNaming({ onDone, collect, getRecorder }){
   const colors=useMemo(()=>buildSequenceNoAdjacent(COLOR_KEYS, TRIALS_PER_TASK),[]);
+  const expectedStimulus=useCallback((i)=>`${colors[Math.min(i, colors.length-1)]}_circle`, [colors]);
   const stimRef=useRef(null);
-  const { idx,start,markStimShown,calibrating,seconds }=useTaskEngine({ 
+  const handleRow=useCallback((base)=>{ collect?.(base); },[collect]);
+  const { idx,start,beginTrial,calibrating }=useTaskEngine({ 
     part:"Naming", 
     totalTrials:TRIALS_PER_TASK,
     getRecorder,
-    expectedStimulus: (i) => `${colors[Math.min(i, colors.length-1)]}_circle`,
-    onRow:(base)=>{ 
-      collect?.(base);
-    }
+    expectedStimulus,
+    onRow:handleRow
   });
   const current=idx>=0 && idx<TRIALS_PER_TASK?colors[idx]:null;
-  useEffect(()=>{ if(current) markStimShown(); },[current,markStimShown]);
+  useEffect(()=>{
+    if(!current || idx<0 || idx>=TRIALS_PER_TASK) return;
+    const cancel = beginTrial();
+    return ()=>{ cancel(); };
+  },[current,idx,beginTrial]);
   const done=idx>=TRIALS_PER_TASK;
 
   const [jitter,setJitter]=useState({x:0,y:0});
@@ -415,7 +541,7 @@ function TaskNaming({ onDone, collect, getRecorder }){
   },[current,done]);
 
   return (
-    <Card title="Task 2 — Baseline Naming" subtitle="Name the circle's color. Press SPACE to advance.">
+  <Card title="Task 2 — Baseline Naming" subtitle="Name the circle’s color. The circle jitters slightly.">
       {idx<0 && (
         <div style={{display:"grid",gap:12}}>
           <Instructions/>
@@ -425,7 +551,6 @@ function TaskNaming({ onDone, collect, getRecorder }){
       )}
       {current && !done && (
         <div style={{display:"grid",gap:10,placeItems:"center"}}>
-          <BigTimer seconds={seconds}/>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%"}}>
             <Pill>Trial {idx+1} / {TRIALS_PER_TASK}</Pill>
           </div>
@@ -440,7 +565,7 @@ function TaskNaming({ onDone, collect, getRecorder }){
               }}
             />
           </div>
-          <div style={{color:MUTED,fontSize:12,textAlign:"center"}}>Speak, then press SPACE.</div>
+          <div style={{color:MUTED,fontSize:12,textAlign:"center"}}>Speak your answer clearly.</div>
         </div>
       )}
       {done && (<div style={{display:"grid",gap:10,marginTop:8}}><Button onClick={onDone} full>Next Task →</Button></div>)}
@@ -450,25 +575,29 @@ function TaskNaming({ onDone, collect, getRecorder }){
 
 function TaskIncongruent({ onDone, collect, getRecorder }){
   const trials=useMemo(()=>buildIncongruentTrials(TRIALS_PER_TASK),[]);
+  const expectedStimulus=useCallback((i)=>{
+    const trial = trials[Math.min(i, trials.length-1)];
+    return trial ? trial.ink : "";
+  },[trials]);
   const stimRef=useRef(null);
-  const { idx,start,markStimShown,calibrating,seconds }=useTaskEngine({ 
+  const handleRow=useCallback((base)=>{ collect?.(base); },[collect]);
+  const { idx,start,beginTrial,calibrating }=useTaskEngine({ 
     part:"Incongruent", 
     totalTrials:TRIALS_PER_TASK,
     getRecorder,
-    expectedStimulus: (i) => {
-      const trial = trials[Math.min(i, trials.length-1)];
-      return trial ? trial.ink : "";
-    },
-    onRow:(base)=>{ 
-      collect?.(base);
-    }
+    expectedStimulus,
+    onRow:handleRow
   });
   const current=idx>=0 && idx<TRIALS_PER_TASK?trials[idx]:null;
-  useEffect(()=>{ if(current) markStimShown(); },[current,markStimShown]);
+  useEffect(()=>{
+    if(!current || idx<0 || idx>=TRIALS_PER_TASK) return;
+    const cancel = beginTrial();
+    return ()=>{ cancel(); };
+  },[current,idx,beginTrial]);
   const done=idx>=TRIALS_PER_TASK;
 
   return (
-    <Card title="Task 3 — Incongruent" subtitle="Name the INK color (ignore the word). Press SPACE to advance.">
+  <Card title="Task 3 — Incongruent" subtitle="Name the INK color (ignore the word).">
       {idx<0 && (
         <div style={{display:"grid",gap:12}}>
           <Instructions/>
@@ -478,7 +607,6 @@ function TaskIncongruent({ onDone, collect, getRecorder }){
       )}
       {current && !done && (
         <div style={{display:"grid",gap:10}}>
-          <BigTimer seconds={seconds}/>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <Pill>Trial {idx+1} / {TRIALS_PER_TASK}</Pill>
           </div>
@@ -488,7 +616,7 @@ function TaskIncongruent({ onDone, collect, getRecorder }){
               {current.word}
             </div>
           </div>
-          <div style={{color:MUTED,fontSize:12,textAlign:"center"}}>Speak, then press SPACE.</div>
+          <div style={{color:MUTED,fontSize:12,textAlign:"center"}}>Speak your answer clearly.</div>
         </div>
       )}
       {done && (
@@ -542,6 +670,7 @@ export default function StroopTestPage(){
   const [step,setStep]=useState(1);
   const [rows,setRows]=useState([]);
   const [sessionBlob,setSessionBlob]=useState(null);
+  const [sessionExt,setSessionExt]=useState(null);
   const [completedTasks, setCompletedTasks] = useState([]);
   const { getRecorder, stopAndGetAudio, hasActive, getExtension } = useSessionAudio();
 
@@ -572,7 +701,7 @@ export default function StroopTestPage(){
     "timestamp_iso": "ISO 8601 timestamp when stimulus appeared (UTC)",
     "stimulus_shown": "What was displayed (e.g., RED or BLUE_circle)",
     "voice_onset_rt_ms": "Voice-Onset Reaction Time - Time from stimulus onset to first speech detected (milliseconds) - Primary measure of cognitive processing speed and attention",
-    "response_duration_ms": "Total trial time from stimulus to SPACE press (milliseconds)",
+  "response_duration_ms": "Total trial time from stimulus onset until auto-advance (milliseconds)",
     "speech_bursts": "Number of speech starts - hesitations/self-corrections (impulsivity indicator)",
   };
 
@@ -588,13 +717,24 @@ export default function StroopTestPage(){
 
   const downloadSessionAudio = async ()=>{
     let blob = sessionBlob;
-    if(!blob){ blob = await stopAndGetAudio(); setSessionBlob(blob); }
+    let ext = sessionExt;
+    if(!blob){
+      blob = await stopAndGetAudio();
+      if(!blob) return;
+      ext = inferExtension(blob.type, getExtension());
+      setSessionBlob(blob);
+      setSessionExt(ext);
+    }
     if(!blob) return;
-    const ext = getExtension();
-    const url=URL.createObjectURL(blob); 
+    if(!ext){
+      ext = inferExtension(blob.type, getExtension());
+      setSessionExt(ext);
+    }
+  const resolvedExt = ext || inferExtension(blob.type, getExtension()) || "webm";
+  const url=URL.createObjectURL(blob); 
     const a=document.createElement("a");
     a.href=url; 
-    a.download=`stroop_session_audio.${ext}`; 
+  a.download=`stroop_session_audio.${resolvedExt}`; 
     document.body.appendChild(a); 
     a.click(); 
     a.remove();
@@ -604,9 +744,9 @@ export default function StroopTestPage(){
   return (
     <Page>
       <div style={{marginBottom:18}}>
-        <h1 style={{margin:0,fontSize:30,letterSpacing:0.3}}>Stroop Test — Speech Analysis</h1>
+        <h1 style={{margin:0,fontSize:30,letterSpacing:0.3}}>Stroop Test</h1>
         <div style={{color:MUTED,fontSize:13,marginTop:6}}>
-          Speak your answer, then press <b>SPACE</b>. All timing metrics are in <b>milliseconds (ms)</b>.
+          Speak the answer clearly; each trial advances automatically. A single CSV + one session audio file are available after the final task.
         </div>
         <div style={{marginTop:12}}><StepNav step={step} setStep={setStep} completedTasks={completedTasks}/></div>
       </div>
@@ -646,15 +786,11 @@ export default function StroopTestPage(){
             </Button>
           </div>
           <div style={{color:MUTED,fontSize:12,marginTop:12,lineHeight:1.6}}>
-            <div><b>CSV includes 7 columns:</b></div>
-            <div>• <b>voice_onset_rt_ms</b> - Voice-Onset Reaction Time: Primary measure of cognitive processing speed (milliseconds)</div>
-            <div>• <b>response_duration_ms</b> - Total trial time (milliseconds)</div>
-            <div>• <b>speech_bursts</b> - Impulsivity indicator: hesitations/self-corrections</div>
-            <div>• <b>timestamp_iso</b> - Exact UTC time when stimulus appeared</div>
-            <div style={{marginTop:8}}><b>Audio:</b> High-quality recording of entire session with echo cancellation and noise suppression.</div>
+            <div><b>CSV (7 cols):</b> voice_onset_rt_ms, response_duration_ms, speech_bursts, timestamp_iso.</div>
+            <div style={{marginTop:8}}><b>Audio:</b> Full-session recording with noise reduction.</div>
           </div>
         </Card>
       )}
     </Page>
   );
-}
+} 
