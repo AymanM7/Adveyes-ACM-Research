@@ -278,7 +278,7 @@ function pickDistractorType() {
   return entries[entries.length - 1][0];
 }
 
-export default function Page(){
+export default function Page({ embedded=false, onDone, onCollect }){
   const [stage, setStage] = useState("intro"); // intro | game | break | done
   const [block, setBlock] = useState(1);
   const [trialInBlock, setTrialInBlock] = useState(0);
@@ -484,7 +484,12 @@ const makePlan = useCallback(() => {
 
   const endBlock = ()=>{
     const nb = block + 1;
-    if (nb > CFG.BLOCKS) { setStage("done"); return; }
+    if (nb > CFG.BLOCKS) { 
+      setStage("done"); 
+      // Pass data to parent when test is complete
+      onCollect?.(dataRef.current);
+      return; 
+    }
     setBlock(nb);
     setStage("break");
   };
@@ -1069,8 +1074,14 @@ const makePlan = useCallback(() => {
           <h2>All Done 🎉</h2>
           <Summary data={dataRef.current} />
           <div className="row" style={{marginTop:8}}>
-            <button onClick={downloadCSV}>Download CSV</button>
-            <button onClick={()=>location.reload()}>Restart</button>
+            {embedded ? (
+              <button onClick={() => onDone?.()}>Continue</button>
+            ) : (
+              <>
+                <button onClick={downloadCSV}>Download CSV</button>
+                <button onClick={()=>location.reload()}>Restart</button>
+              </>
+            )}
           </div>
         </div>
 
