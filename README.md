@@ -17,10 +17,14 @@ once finished go to the following files and change the file paths to where your 
 
 Running Experiment:
 cd adveyes
+python eye_tracking/MonitorTracking.py
+
+// OPEN A NEW TERMINAL
 npm run dev
 
-When starting the cpt card test, press start, wait for camera to load.
-A new window should pop up with live eye tracking.
+At this point, a new window should pop up showing live eyetracking
+
+Before starting the cpt card test, open the live eye tracking window
 Prompt the user to look at the center of the screen, and while looking press C. This should calibrate the eye tracker
 Then return to the testing site and press "start" to actualy begin.
 When all 3 cpt card trials are done, go back to the eye tracking window and press Q to end the eye tracking session.
