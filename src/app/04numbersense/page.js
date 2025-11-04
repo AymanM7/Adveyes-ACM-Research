@@ -3,42 +3,52 @@
 import React, { useState, useMemo, useRef } from "react"
 
 function randInt(min, max) {
+  // Ensure min <= max to avoid NaN ranges
+  if (max < min) {
+    const t = min; min = max; max = t;
+  }
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
 function generateComparisonNumber(problem) {
-  const product = problem.a * problem.b
-
-  // Try multiple strategies but never loop forever; ensure >=10 and diff >=5
+  const product = problem.a * problem.b;
+  
   const strategies = [
     () => {
-      const variance = Math.max(5, Math.floor(product * 0.2))
-      const low = Math.max(10, product - variance)
-      const high = Math.max(low + 1, product + variance)
-      return randInt(low, high)
+      const variance = product * 0.2;
+      return randInt(Math.max(1, Math.floor(product - variance)), Math.floor(product + variance));
     },
     () => {
-      const roundTo = randInt(1, 3) === 1 ? 10 : 25
-      const base = Math.round(product / roundTo) * roundTo
-      const delta = (randInt(1, 2)) * roundTo // at least one step away
-      return base + (randInt(0, 1) ? delta : -delta)
+      const roundTo = randInt(1, 3) === 1 ? 10 : 25;
+      const base = Math.round(product / roundTo) * roundTo;
+      return base + (randInt(0, 1) ? roundTo : -roundTo);
     },
     () => {
-      const maxReasonable = Math.max(100, product * 3)
-      return randInt(10, maxReasonable)
+      const maxReasonable = Math.max(100, product * 3);
+      return randInt(10, maxReasonable);
     }
-  ]
+  ];
+  
+  const strategy = strategies[randInt(0, strategies.length - 1)];
+  let comparisonNumber = strategy();
 
-  for (let i = 0; i < 24; i++) {
-    const candidate = strategies[randInt(0, strategies.length - 1)]()
-    if (candidate >= 10 && Math.abs(candidate - product) >= 5) return candidate
+  // Safety: cap attempts so we never loop forever
+  let attempts = 0
+  const maxAttempts = 30
+  while ((typeof comparisonNumber !== 'number' || isNaN(comparisonNumber) || Math.abs(comparisonNumber - product) < 5 || comparisonNumber < 10) && attempts < maxAttempts) {
+    comparisonNumber = strategy();
+    attempts += 1
   }
 
-  // Fallback guarantees constraints
-  return product + 10
+  if (attempts >= maxAttempts || typeof comparisonNumber !== 'number' || isNaN(comparisonNumber)) {
+    // Fallback: choose a sensible value near product
+    comparisonNumber = Math.max(10, Math.round(product * 0.7) || 10)
+  }
+
+  return Math.max(10, comparisonNumber);
 }
 
-function generateProblemSet(count = 3) {
+function generateProblemSet(count = 7) {
   const problems = [];
   
   for (let i = 0; i < count; i++) {
@@ -84,9 +94,12 @@ function generateProblemSet(count = 3) {
 }
 
 export default function MathNumberSense({ embedded=false, onDone }) {
-  const [problems, setProblems] = useState(null)
+  // Initialize problems synchronously so the page doesn't show a perpetual loading state
+  const [problems, setProblems] = useState(() => generateProblemSet(7))
   const [currentProblemIndex, setCurrentProblemIndex] = useState(0)
   const [testStarted, setTestStarted] = useState(false)
+  const [answers, setAnswers] = useState(() => Array(problems.length).fill(null))
+  const [hoveredAnswer, setHoveredAnswer] = useState(null)
   const [recordingTime, setRecordingTime] = useState(0)
   const [testCompleted, setTestCompleted] = useState(false)
   const [uploadSuccess, setUploadSuccess] = useState(false)
@@ -98,11 +111,7 @@ export default function MathNumberSense({ embedded=false, onDone }) {
   const timerRef = useRef(null)
   const testStartTimeRef = useRef(null)
 
-  React.useEffect(() => {
-    if (!problems) {
-      setProblems(generateProblemSet(3))
-    }
-  }, [problems])
+  // problems are initialized synchronously above; no useEffect needed
 
   if (!problems) {
     return <div style={{ padding: "2rem", textAlign: "center", fontSize: "1.2rem" }}>Loading...</div>
@@ -174,9 +183,17 @@ export default function MathNumberSense({ embedded=false, onDone }) {
     if (mediaRecorderRef.current && testStarted) {
       mediaRecorderRef.current.stop();
     }
-  }
+    audioChunksRef.current = [];
+
+  };
 
   const goToNextProblem = () => {
+    // require an answer before advancing
+    if (!answers[currentProblemIndex]) {
+      alert('Please indicate whether the product is larger or smaller before continuing.')
+      return
+    }
+
     if (currentProblemIndex < problems.length - 1) {
       const currentTime = Date.now() - testStartTimeRef.current;
       const newIndex = currentProblemIndex + 1;
@@ -192,6 +209,23 @@ export default function MathNumberSense({ embedded=false, onDone }) {
     } else {
       stopTest();
     }
+  }
+
+  const handleAnswer = (choice) => {
+    const now = Date.now()
+    const rel = testStartTimeRef.current ? now - testStartTimeRef.current : 0
+    const p = problems[currentProblemIndex]
+    const correct = choice === 'larger' ? (p.product > p.comparisonNumber) : (p.product < p.comparisonNumber)
+    setAnswers(prev => {
+      const copy = [...prev]
+      copy[currentProblemIndex] = {
+        answer: choice,
+        unixTime: now,
+        timeSinceStartMs: rel,
+        correct: !!correct
+      }
+      return copy
+    })
   }
 
   const audioBufferToWav = (audioBuffer) => {
@@ -273,6 +307,33 @@ export default function MathNumberSense({ embedded=false, onDone }) {
       const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
       const wavBlob = audioBufferToWav(audioBuffer);
       
+      // Prepare markers data
+      const markersData = {
+        testDate: new Date().toISOString(),
+        totalDuration: recordingTime,
+        problems: problems.map((p, idx) => ({
+          index: idx,
+          description: p.description,
+          type: p.type,
+          product: p.product,
+          comparisonNumber: p.comparisonNumber,
+          isLargerThanComparison: p.isLargerThanComparison,
+          answer: answers[idx] ? answers[idx].answer : null,
+          correct: answers[idx] ? answers[idx].correct : null,
+          answerTimeSinceStartMs: answers[idx] ? answers[idx].timeSinceStartMs : null
+        })),
+        timeMarkers: timeMarkers
+      };
+
+      // If embedded mode, call onDone to navigate to export page
+      if (embedded) {
+        onDone?.({ wavBlob, markers: markersData });
+        setUploadSuccess(true);
+        setUploading(false);
+        return;
+      }
+
+      // Otherwise, download files locally (existing behavior)
       const now = new Date();
       const dateStr = now.toISOString().split('T')[0];
       const audioFilename = `math_number_sense_${dateStr}.wav`;
@@ -292,20 +353,6 @@ export default function MathNumberSense({ embedded=false, onDone }) {
       }, 100);
 
       // Download markers file
-      const markersData = {
-        testDate: new Date().toISOString(),
-        totalDuration: recordingTime,
-        problems: problems.map((p, idx) => ({
-          index: idx,
-          description: p.description,
-          type: p.type,
-          product: p.product,
-          comparisonNumber: p.comparisonNumber,
-          isLargerThanComparison: p.isLargerThanComparison
-        })),
-        timeMarkers: timeMarkers
-      };
-
       const markersBlob = new Blob([JSON.stringify(markersData, null, 2)], { type: 'application/json' });
       const markersUrl = URL.createObjectURL(markersBlob);
       const markersLink = document.createElement('a');
@@ -319,20 +366,14 @@ export default function MathNumberSense({ embedded=false, onDone }) {
         URL.revokeObjectURL(markersUrl);
       }, 100);
 
+      // Also download CSV automatically along with audio and markers
+      try {
+        downloadCSV()
+      } catch (err) {
+        console.error('Error auto-downloading CSV:', err)
+      }
+
       setUploadSuccess(true);
-      if(embedded){ onDone?.({ wavBlob: wavBlob, markers: {
-        testDate: new Date().toISOString(),
-        totalDuration: recordingTime,
-        problems: problems.map((p, idx) => ({
-          index: idx,
-          description: p.description,
-          type: p.type,
-          product: p.product,
-          comparisonNumber: p.comparisonNumber,
-          isLargerThanComparison: p.isLargerThanComparison
-        })),
-        timeMarkers: timeMarkers
-      }}); }
     } catch (error) {
       console.error('Error downloading:', error);
       alert('Error downloading files. Please try again.');
@@ -341,8 +382,46 @@ export default function MathNumberSense({ embedded=false, onDone }) {
     }
   };
 
+  // Generate CSV of answers and provide as a download
+  const downloadCSV = () => {
+    if (!answers || answers.length === 0) {
+      alert('No answers recorded')
+      return
+    }
+
+    const rows = []
+    // timeSinceStartSeconds is seconds since test start (with 2 decimals)
+    rows.push(['problemIndex', 'description', 'answer', 'timeSinceStartSeconds', 'correct'])
+    answers.forEach((ans, idx) => {
+      const p = problems[idx]
+      if (!ans) {
+        rows.push([idx, p.description, '', '', ''])
+      } else {
+  const seconds = typeof ans.timeSinceStartMs === 'number' ? (ans.timeSinceStartMs / 1000).toFixed(4) : ''
+        rows.push([idx, p.description, ans.answer, seconds, ans.correct])
+      }
+    })
+
+    const csvContent = rows.map(r => r.map(cell => {
+      if (typeof cell === 'string' && (cell.includes(',') || cell.includes('"') || cell.includes('\n'))) {
+        return '"' + cell.replace(/"/g, '""') + '"'
+      }
+      return String(cell)
+    }).join(',')).join('\n')
+
+    const csvBlob = new Blob([csvContent], { type: 'text/csv' })
+    const csvUrl = URL.createObjectURL(csvBlob)
+    const csvLink = document.createElement('a')
+    csvLink.href = csvUrl
+    csvLink.download = `math_number_sense_answers_${new Date().toISOString().split('T')[0]}.csv`
+    document.body.appendChild(csvLink)
+    csvLink.click()
+    document.body.removeChild(csvLink)
+    setTimeout(() => URL.revokeObjectURL(csvUrl), 100)
+  }
+
   const resetTest = () => {
-    const newProblems = generateProblemSet(3);
+    const newProblems = generateProblemSet(7);
     setProblems(newProblems);
     setCurrentProblemIndex(0);
     audioChunksRef.current = [];
@@ -470,13 +549,13 @@ export default function MathNumberSense({ embedded=false, onDone }) {
               fontSize: "1.05rem"
             }}
           >
-            {uploading ? 'Processing...' : 'Download Audio & Markers'}
+            {uploading ? 'Processing...' : embedded ? 'Continue to Export' : 'Download Audio & Markers'}
           </button>
         )}
 
         {uploadSuccess && (
           <p style={{ color: "#28a745", marginBottom: "1.5rem", fontSize: "0.95rem" }}>
-            Audio and markers file downloaded successfully
+            {embedded ? 'Proceeding to export page...' : 'Audio and markers file downloaded successfully'}
           </p>
         )}
 
@@ -567,7 +646,39 @@ export default function MathNumberSense({ embedded=false, onDone }) {
         Is it larger than: <strong>{currentProblem.comparisonNumber}</strong>?
       </div>
 
-      {/* timer hidden per unified spec */}
+      <div style={{ marginTop: '1rem' }}>
+        <button
+          onMouseEnter={() => setHoveredAnswer('larger')}
+          onMouseLeave={() => setHoveredAnswer(null)}
+          onClick={() => handleAnswer('larger')}
+          style={{
+            ...btnStyle,
+            marginRight: '0.5rem',
+            background: answers[currentProblemIndex] && answers[currentProblemIndex].answer === 'larger' ? '#004a99' : (hoveredAnswer === 'larger' ? '#005fbf' : btnStyle.background),
+            boxShadow: answers[currentProblemIndex] && answers[currentProblemIndex].answer === 'larger' ? '0 4px 8px rgba(0,75,153,0.25)' : btnStyle.boxShadow
+          }}
+        >
+          Larger
+        </button>
+
+        <button
+          onMouseEnter={() => setHoveredAnswer('smaller')}
+          onMouseLeave={() => setHoveredAnswer(null)}
+          onClick={() => handleAnswer('smaller')}
+          style={{
+            ...secondaryBtnStyle,
+            background: answers[currentProblemIndex] && answers[currentProblemIndex].answer === 'smaller' ? '#cfe8ff' : (hoveredAnswer === 'smaller' ? '#e6f3ff' : secondaryBtnStyle.background),
+            boxShadow: answers[currentProblemIndex] && answers[currentProblemIndex].answer === 'smaller' ? '0 4px 8px rgba(0,102,204,0.12)' : secondaryBtnStyle.boxShadow,
+            border: answers[currentProblemIndex] && answers[currentProblemIndex].answer === 'smaller' ? '2px solid #0066cc' : secondaryBtnStyle.border
+          }}
+        >
+          Smaller
+        </button>
+      </div>
+
+      <div style={timerStyle}>
+        {formatTime(recordingTime)}
+      </div>
 
       <div style={{ 
         margin: "1rem 0",
@@ -603,7 +714,7 @@ export default function MathNumberSense({ embedded=false, onDone }) {
         color: "#555",
         lineHeight: "1.6"
       }}>
-        <strong style={{color: "#0066cc"}}>Instructions:</strong> State your answer aloud, then click Continue to move to the next problem. The recording is continuous and will include timestamps for each question.
+        <strong style={{color: "#0066cc"}}>Instructions:</strong> For each math problem that appears, explain your thought process as to why it is larger or smaller than the other number shown. Then, select your answer & click Continue to move to the next problem. The recording is continuous and will include timestamps for each question.
       </div>
     </div>
   )
