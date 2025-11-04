@@ -714,7 +714,7 @@ export default function MathNumberSense({ embedded=false, onDone }) {
         color: "#555",
         lineHeight: "1.6"
       }}>
-        <strong style={{color: "#0066cc"}}>Instructions:</strong> State your answer aloud, then click Continue to move to the next problem. The recording is continuous and will include timestamps for each question.
+        <strong style={{color: "#0066cc"}}>Instructions:</strong> For each math problem that appears, explain your thought process as to why it is larger or smaller than the other number shown. Then, select your answer & click Continue to move to the next problem. The recording is continuous and will include timestamps for each question.
       </div>
     </div>
   )
