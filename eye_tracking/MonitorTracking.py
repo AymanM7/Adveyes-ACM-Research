@@ -82,12 +82,12 @@ nose_indices = [4, 45, 275, 220, 440, 1, 5, 51, 281, 44, 274, 241,
                 3, 248]
 
 # ===== NEW: File writing for screen position =====
-screen_position_file = "C:\\Users\\legab\\Downloads\\combined_integration\\adveyes\\eye_tracking\\screen_position.txt"
+screen_position_file = "C:\\Users\\Ayman\\Documents\\adveyes\\eye_tracking\\screen_position.txt"
 # ===== NEW: NDJSON output for gaze records =====
 import pathlib
 
 # Per-session output: create folder and unique filename (timestamped)
-out_dir = pathlib.Path(r"C:\Users\legab\Downloads\combined_integration\adveyes\eye_tracking\gaze_sessions")
+out_dir = pathlib.Path(r"C:\\Users\\Ayman\\Documents\\adveyes\\eye_tracking\\gaze_sessions")
 out_dir.mkdir(parents=True, exist_ok=True)
 ts_label = time.strftime("%Y%m%d-%H%M%S")
 gaze_output_file = str(out_dir / f"gaze_output_{ts_label}.ndjson")

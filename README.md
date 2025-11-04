@@ -24,3 +24,7 @@ A new window should pop up with live eye tracking.
 Prompt the user to look at the center of the screen, and while looking press C. This should calibrate the eye tracker
 Then return to the testing site and press "start" to actualy begin.
 When all 3 cpt card trials are done, go back to the eye tracking window and press Q to end the eye tracking session.
+
+
+PYTHON EYE:
+python .\eye_tracking\MonitorTracking.py
