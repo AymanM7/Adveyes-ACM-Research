@@ -17,7 +17,8 @@ const CFG = {
   ADAPT_DOWN_STEP: 60,
   // overall distractor show rate governed by 'none': show ≈ 1 - none
   DISTRACTOR_PROBS: { none: 0.35, notification: 0.17, banner: 0.12, ripple: 0.1, screen: 0.1, shape: 0.16 },
-  DISTRACTOR_ONSET_MS: [150, 400],
+  // Range for random distractor onset timing in milliseconds: [min, max]
+    DISTRACTOR_ONSET_MS: [150, 400],
   DISTRACTOR_DUR_MS: [1500, 2800], // realistic but not overwhelming
   // Notification content for realistic distractions
   NOTIFICATION_CONTENT: [

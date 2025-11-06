@@ -1,0 +1,31 @@
+participant_id,block_index,trial_index_global,trial_index_block,letter,is_target,has_distractor,distractor_level,distractor_type,distractor_onset_ms,distractor_duration_ms,distractor_pos_px_x,distractor_pos_px_y,distractor_quadrant,stim_duration_ms,isi_ms,response_key,response_time_ms,is_hit,is_omission,is_commission,timestamp_ms
+anon,1,1,1,9 of diamonds,0,1,ripple,ripple,290.0,2535.0,1343.0,340.0,right,1300,800,none,,0,0,0,1761859185931
+anon,1,1,2,jack of spades,0,1,ripple,ripple,392.0,2736.0,201.0,231.0,left,1300,800,none,,0,0,0,1761859188038
+anon,1,1,3,7 of diamonds,1,1,notification,notification,284.0,1600.0,22.0,355.0,left,1300,800,space,812.0,1,0,0,1761859190167
+anon,1,1,4,9 of hearts,0,0,none,none,,,,,,1300,800,none,,0,0,0,1761859192276
+anon,1,1,5,5 of spades,0,1,screen,none,,,,,,1300,800,none,,0,0,0,1761859194388
+anon,1,1,6,2 of hearts,0,1,ripple,ripple,383.0,2159.0,1337.0,413.0,right,1300,800,none,,0,0,0,1761859196495
+anon,1,1,7,7 of diamonds,1,0,none,none,,,,,,1300,800,space,818.0,1,0,0,1761859198602
+anon,1,1,8,8 of hearts,0,1,screen,none,,,,,,1300,800,none,,0,0,0,1761859200705
+anon,1,1,9,jack of diamonds,0,0,none,none,,,,,,1300,800,none,,0,0,0,1761859202812
+anon,1,1,10,jack of diamonds,0,1,falsecard,falsecard,158.0,1370.0,80.0,157.0,left,1300,800,none,,0,0,0,1761859204922
+anon,2,11,1,ace of hearts,0,1,ripple,ripple,273.0,2567.0,282.0,468.0,left,1300,800,none,,0,0,0,1761859213145
+anon,2,11,2,7 of diamonds,1,1,notification,notification,344.0,2461.0,25.0,340.0,left,1300,800,space,572.0,1,0,0,1761859215252
+anon,2,11,3,9 of hearts,0,1,ripple,ripple,277.0,2412.0,435.0,52.0,top,1300,800,none,,0,0,0,1761859217357
+anon,2,11,4,5 of spades,0,1,ripple,ripple,393.0,2602.0,1441.0,682.0,right,1300,800,none,,0,0,0,1761859219470
+anon,2,11,5,black joker,0,1,ripple,ripple,276.0,1723.0,218.0,223.0,left,1300,800,none,,0,0,0,1761859221578
+anon,2,11,6,7 of clubs,0,1,banner,none,,,,,,1300,800,none,,0,0,0,1761859223684
+anon,2,11,7,5 of clubs,0,1,falsecard,falsecard,208.0,1007.0,1310.0,372.0,right,1300,800,none,,0,0,0,1761859225794
+anon,2,11,8,9 of diamonds,0,1,ripple,ripple,375.0,2453.0,237.0,506.0,left,1300,800,none,,0,0,0,1761859227898
+anon,2,11,9,7 of diamonds,1,1,notification,notification,285.0,1906.0,32.0,270.0,left,1300,800,space,516.0,1,0,0,1761859230005
+anon,2,11,10,8 of diamonds,0,1,shape,shape,224.0,1745.0,1400.0,546.0,right,1300,800,none,,0,0,0,1761859232119
+anon,3,21,1,3 of hearts,0,1,ripple,ripple,262.0,1716.0,243.0,451.0,left,1300,800,none,,0,0,0,1761859237337
+anon,3,21,2,jack of spades,0,1,ripple,ripple,313.0,2166.0,1368.0,388.0,right,1300,800,none,,0,0,0,1761859239443
+anon,3,21,3,7 of diamonds,1,1,banner,none,,,,,,1300,800,space,607.0,1,0,0,1761859241549
+anon,3,21,4,queen of hearts,0,1,screen,none,,,,,,1300,800,none,,0,0,0,1761859243653
+anon,3,21,5,queen of clubs,0,1,falsecard,falsecard,381.0,901.0,66.0,137.0,left,1300,800,none,,0,0,0,1761859245761
+anon,3,21,6,king of clubs,0,1,falsecard,falsecard,196.0,1405.0,113.0,194.0,left,1300,800,none,,0,0,0,1761859247878
+anon,3,21,7,6 of hearts,0,0,none,none,,,,,,1300,800,none,,0,0,0,1761859249990
+anon,3,21,8,8 of spades,0,1,banner,none,,,,,,1300,800,none,,0,0,0,1761859252093
+anon,3,21,9,9 of diamonds,0,1,banner,none,,,,,,1300,800,none,,0,0,0,1761859254211
+anon,3,21,10,7 of diamonds,1,1,notification,notification,372.0,2072.0,36.0,268.0,left,1300,800,space,584.0,1,0,0,1761859256313
