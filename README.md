@@ -118,10 +118,6 @@ To compare participants consistently, we compute **group-level statistics** (inc
 
 
 
-[ACM Research Adveyes (3).pdf](https://github.com/user-attachments/files/24317852/ACM.Research.Adveyes.3.pdf)
-
-
-
 ## Future Roadmap
 
 - **Expand the dataset**
