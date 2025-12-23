@@ -11,12 +11,12 @@
 
 
 ## Overview
-ADVEYES is a research project exploring a more accessible way to capture **objective attention signals** using common hardware (laptop webcam + mic) for people with instable medical insurance or  who have limited financial resources. Traditional ADHD evaluation often relies heavily on self-report and long clinical assesments; our goal is to pair a short task battery with measurable gaze tracking ,behavioral and speech markers to support research-grade screening signals.
+ADVEYES is a research project exploring a more accessible way to capture **objective attention signals** using common hardware (laptop webcam + mic) for people with instable medical insurance or thoose with limited financial resources. Traditional ADHD evaluation often relies heavily on self-report and long clinical assesments; our goal is to pair a short task battery with measurable gaze tracking ,behavioral and speech markers.
 
 ## Experiment Process / Setup
-We created a simple scheduling pipeline to run participants in our lab:
+We created a simple scheduling pipeline to run the expirement with participants in our lab:
 - **Google Form** for participants to fill out and ** give consent to participate in our study**
-- **Calendly** for scheduling sessions
+- **Calendly** for scheduling sessions with our Participants
 - **Participants:** **10 clinically diagnosed ADHD** + **10 non-ADHD** 
 
 During lab sessions we collected:
