@@ -117,6 +117,11 @@ We process all 20 of our participant `.wav` files using **Praat** to extract spe
 To compare participants consistently, we compute **group-level statistics** (including **standard deviation** and **z-scores**) and evaluate separation between ADHD vs non-ADHD groups based on reaction time and average combined score.
 
 
+### Research Poster 
+
+![Screenshot_23-12-2025_144739_www linkedin com](https://github.com/user-attachments/assets/e42f1f21-bb3b-440a-abc4-61760dafb07a)
+
+
 
 ## Future Roadmap
 
