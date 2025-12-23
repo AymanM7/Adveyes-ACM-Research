@@ -11,18 +11,17 @@
 
 
 ## Overview
-ADVEYES is a research prototype exploring a faster, more accessible way to capture **objective attention signals** using common hardware (laptop webcam + mic) for thoose with instable medical insurance or thoose who have limited financial resources. Traditional ADHD evaluation often relies heavily on self-report and long clinical assesment; our goal is to pair a short task battery with measurable behavioral and speech markers to support research-grade screening signals.
+ADVEYES is a research project exploring a more accessible way to capture **objective attention signals** using common hardware (laptop webcam + mic) for people with instable medical insurance or  who have limited financial resources. Traditional ADHD evaluation often relies heavily on self-report and long clinical assesments; our goal is to pair a short task battery with measurable gaze tracking ,behavioral and speech markers to support research-grade screening signals.
 
 ## Experiment Process / Setup
 We created a simple scheduling pipeline to run participants in our lab:
 - **Google Form** for participants to fill out and ** give consent to participate in our study**
 - **Calendly** for scheduling sessions
-- **Participants:** **10 clinically diagnosed ADHD** + **10 non-ADHD** controls
+- **Participants:** **10 clinically diagnosed ADHD** + **10 non-ADHD** 
 
 During lab sessions we collected:
-- **Eye tracking** (only during Card CPT)
+- **Eye tracking / Body Tracking (Head Movement)** (only during Card CPT)
 - **Audio recordings** (during Stroop, Free Speech, and Math/Number Sense)
-- **Task performance data** (accuracy, timing, and other key derived metrics specific to each test)
 
 ---
 
@@ -57,7 +56,7 @@ A sustained-attention task where participants respond to target stimuli across r
 ---
 
 ### Stroop CPT (Audio + Key Cognitive Metrics)
-A selective attention / inhibition task with 69 questions taking on  congruent vs incongruent interference.
+A selective attention / inhibition task where Participants answer 69 questions taking on congruent vs incongruent interference.
 
 **Captured data (most important):**
 - **Accuracy %** (total number of questions correct)
@@ -67,6 +66,8 @@ A selective attention / inhibition task with 69 questions taking on  congruent v
 
 
 ![Screenshot_23-12-2025_134733_localhost](https://github.com/user-attachments/assets/aecb0831-b33c-4ffc-9d27-0beaf09725e4)
+
+
 
 
 
@@ -106,7 +107,38 @@ Participants solve number-sense / reasoning questions and explain answers out lo
 
 ![Screenshot_23-12-2025_135012_localhost](https://github.com/user-attachments/assets/a955c85d-af4a-41e8-a085-8b40a5510ae0)
 
+### Eye Tracking / Body Tracking Model (Card CPT only)
+We trained a **Logistic Regression** classifier using gaze/head movement data captured from our participants during the Card CPT.
+- Input stream is based on **quaternion rotation** data
+- We extract gaze movement features (e.g., saccades/fixations) and apply a **sliding window** to capture short-term temporal context
+
+### Audio Processing (Stroop + Free Speech + Number Sense)
+We process all 20 of our participant `.wav` files using **Praat** to extract speech features (e.g., pitch, jitter, HNR, speech burts, Intensity, Reaction Time(MS), etc).
+To compare participants consistently, we compute **group-level statistics** (including **standard deviation** and **z-scores**) and evaluate separation between ADHD vs non-ADHD groups based on reaction time and average combined score.
 
 
 
+[ACM Research Adveyes (3).pdf](https://github.com/user-attachments/files/24317852/ACM.Research.Adveyes.3.pdf)
 
+
+
+## Future Roadmap
+
+- **Expand the dataset**
+  - Recruit a larger and more diverse participant pool (age, gender, clinical subtypes) to improve generalization instead of just UTD Based students
+  - Add repeated sessions per participant to measure within-person consistency over time.
+
+- **Improve calibration + robustness**
+  - Make eye-tracking calibration fully guided in-app (step-by-step UI instead of manual key presses).
+  - Reduce sensitivity to lighting, camera quality, and head pose drift during Card CPT.
+
+- **Unify data collection + exports**
+  - Standardize a single session output format (CSV/JSON) across all tasks.
+
+- **Stronger modeling + validation**
+  - Compare Logistic Regression to stronger baselines (SVM, Random Forest, gradient boosting).
+  - Add cross-validation and holdout testing with clear reporting (accuracy, F1, ROC-AUC).
+
+- **Better speech analytics**
+  - Extend beyond Praat features with richer audio markers (pause structure, speech rate, prosody variability).
+  - Improve detection for disfluencies and “false triggers” (self-corrections) during Stroop.
