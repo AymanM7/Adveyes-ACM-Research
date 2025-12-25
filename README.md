@@ -50,8 +50,6 @@ A sustained-attention task where participants respond to target stimuli across r
 
 
 
-<img width="1527" height="855" alt="Screenshot 2025-12-18 015015" src="https://github.com/user-attachments/assets/a1945999-37c6-44e3-92c1-6068972ddfab" />
-
 
 
 
